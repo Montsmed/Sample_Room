@@ -12,11 +12,12 @@ SHELVES = {
     "B": [1, 2, 3],
     "C": [1, 2, 3, 4],
     "D": [1, 2, 3, 4],
-    "E": [4],
+    "E": [4],  # Only layer 4 for E
 }
 SHELF_ORDER = ["A", "B", "C", "D", "E"]
-LAYER_ORDER = [4, 3, 2, 1]
+LAYER_ORDER = [4, 3, 2, 1]  # Top to bottom
 
+# Color schemes
 LIGHT_SHELF_COLORS = {
     "A": "#ADD8E6",
     "B": "#90EE90",
@@ -67,10 +68,10 @@ def load_data(uploaded_file):
 def get_all_edited_data(data):
     edited_layers = []
     for key in st.session_state.keys():
-        if key.startswith("temp_edits_"):
+        if key.startswith("temp_edits_") and not key.endswith("_edited"):
             layer = key.replace("temp_edits_", "")
-            temp_df = st.session_state[key]
-            if not temp_df.empty:
+            temp_df = st.session_state.get(f"temp_edits_{layer}_edited", None)
+            if temp_df is not None and not temp_df.empty:
                 temp_df = temp_df.copy()
                 temp_df["Location"] = layer
                 edited_layers.append(temp_df)
@@ -207,32 +208,26 @@ if selected_layer:
     st.markdown(f"## Items in **{selected_layer}**")
     editor_key = f"editor_{selected_layer}"
     layer_key = f"temp_edits_{selected_layer}"
+    layer_key_edited = f"temp_edits_{selected_layer}_edited"
 
     # --- Only initialize temp memory for this layer if not present ---
     if layer_key not in st.session_state:
-        if not layer_data.empty:
-            st.session_state[layer_key] = layer_data.copy()
-        else:
-            st.session_state[layer_key] = pd.DataFrame(columns=data.columns)
+        st.session_state[layer_key] = layer_data.copy()
+    if layer_key_edited not in st.session_state:
+        st.session_state[layer_key_edited] = st.session_state[layer_key].copy()
 
-    # --- Use session state as single source of truth for editor ---
-    editor_value = st.session_state[layer_key]
-
-    # --- Store row count before editing, to detect deletion ---
-    prev_row_count = len(editor_value)
-
-    edited_data = st.data_editor(
-        editor_value,
+    # --- Use the edited copy for the editor ---
+    prev_row_count = len(st.session_state[layer_key_edited])
+    edited_value = st.data_editor(
+        st.session_state[layer_key_edited],
         num_rows="dynamic",
         use_container_width=True,
         key=editor_key
     )
-
-    # --- Always update temp memory with latest edits ---
-    st.session_state[layer_key] = ensure_dataframe(edited_data, data.columns)
+    st.session_state[layer_key_edited] = ensure_dataframe(edited_value, data.columns)
 
     # --- Force rerun if a row was deleted (fixes double-delete issue) ---
-    if len(edited_data) < prev_row_count:
+    if len(edited_value) < prev_row_count:
         st.rerun()
 
     # --- Gallery: Multiple images per row, fixed width 200px ---
@@ -240,8 +235,8 @@ if selected_layer:
     images_per_row = 5
     PLACEHOLDER_IMAGE = "https://github.com/Montsmed/Sample_Room/raw/main/No_Image.jpg"
     img_rows = [
-        edited_data.iloc[i:i+images_per_row]
-        for i in range(0, len(edited_data), images_per_row)
+        edited_value.iloc[i:i+images_per_row]
+        for i in range(0, len(edited_value), images_per_row)
     ]
     for img_row in img_rows:
         cols = st.columns(len(img_row))
@@ -287,6 +282,8 @@ if selected_layer:
 
     if st.button("Save Changes", key=f"save_{selected_layer}"):
         # Save edits to main data
+        edited_data = st.session_state[layer_key_edited].copy()
+        st.session_state[layer_key] = edited_data.copy()
         data = data[data["Location"] != selected_layer]
         if not edited_data.empty:
             edited_data["Location"] = selected_layer
@@ -295,8 +292,8 @@ if selected_layer:
         else:
             st.success("No items to save for this shelf.")
 
-        # Reset temp memory for this layer to the saved data
-        st.session_state[layer_key] = edited_data.copy()
+        # After save, keep the edited copy in sync with the saved copy
+        st.session_state[layer_key_edited] = edited_data.copy()
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -315,7 +312,6 @@ else:
 st.markdown("---")
 st.markdown("### 📥 Download Inventory Including All Unsaved Edits")
 
-# Always show the download button, and prepare the file on every run
 global_data = get_all_edited_data(data)
 output = io.BytesIO()
 with pd.ExcelWriter(output, engine='openpyxl') as writer:
