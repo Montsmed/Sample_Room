@@ -60,6 +60,58 @@ def ensure_changes_saved():
             return False
     return False
 
+def delete_selected_rows():
+    """Delete selected rows from the current layer"""
+    current_layer = st.session_state.get("selected_layer")
+    if current_layer and "selected_rows_for_deletion" in st.session_state:
+        try:
+            selected_rows = st.session_state["selected_rows_for_deletion"]
+            if selected_rows:
+                # Get current layer data
+                current_data = st.session_state["inventory_data"]
+                layer_data = current_data[current_data["Location"] == current_layer].reset_index(drop=True)
+                
+                # Get indices of rows to delete
+                rows_to_delete = []
+                for selected_row in selected_rows:
+                    # Find the matching row in the current layer data
+                    for idx, row in layer_data.iterrows():
+                        if (row["Description"] == selected_row.get("Description", "") and
+                            row["Unit"] == selected_row.get("Unit", "") and
+                            row["Model"] == selected_row.get("Model", "") and
+                            row["SN/Lot"] == selected_row.get("SN/Lot", "")):
+                            rows_to_delete.append(idx)
+                            break
+                
+                # Remove selected rows from layer data
+                if rows_to_delete:
+                    layer_data = layer_data.drop(rows_to_delete).reset_index(drop=True)
+                    
+                    # Update main inventory data
+                    st.session_state["inventory_data"] = st.session_state["inventory_data"][
+                        st.session_state["inventory_data"]["Location"] != current_layer
+                    ]
+                    
+                    # Add back the updated layer data
+                    if not layer_data.empty:
+                        layer_data["Location"] = current_layer
+                        st.session_state["inventory_data"] = pd.concat([
+                            st.session_state["inventory_data"], 
+                            layer_data
+                        ], ignore_index=True)
+                    
+                    # Clear selected rows
+                    del st.session_state["selected_rows_for_deletion"]
+                    st.session_state["changes_saved"] = True
+                    st.session_state["last_save_time"] = time.time()
+                    
+                    return len(rows_to_delete)
+            return 0
+        except Exception as e:
+            st.error(f"Error deleting rows: {str(e)}")
+            return 0
+    return 0
+
 @st.cache_data
 def load_data(uploaded_file):
     in_mem_file = io.BytesIO(uploaded_file.read())
@@ -110,6 +162,8 @@ def initialize_session_state():
         st.session_state["last_save_time"] = None
     if "changes_saved" not in st.session_state:
         st.session_state["changes_saved"] = True
+    if "selected_rows_for_deletion" not in st.session_state:
+        st.session_state["selected_rows_for_deletion"] = []
 
 # --- Main App Configuration ---
 st.set_page_config(page_title="Inventory Visual Manager", layout="wide")
@@ -153,10 +207,6 @@ if st.session_state["inventory_data"] is None:
 
 data = st.session_state["inventory_data"]
 
-# --- Unsaved Changes Indicator ---
-if not st.session_state.get("changes_saved", True):
-    st.warning("⚠️ You have unsaved changes in the current layer!")
-
 # --- Search ---
 search_query = st.text_input("🔎 Search items by Description, Unit, Model, or SN/Lot (partial match):")
 
@@ -187,7 +237,7 @@ if search_query:
 
 st.markdown("### Click a shelf layer to view/edit its items:")
 
-# --- Interactive Shelf Grid with Auto-Save Navigation ---
+# --- Interactive Shelf Grid with Auto-Save Navigation and Centered Text ---
 for layer_num in LAYER_ORDER:
     cols = st.columns(len(SHELF_ORDER) + 1)
     cols[0].markdown(
@@ -199,12 +249,17 @@ for layer_num in LAYER_ORDER:
             layer_label = f"{shelf}{layer_num}"
             color = SHELF_COLORS[shelf]
             highlight = (st.session_state["selected_layer"] == layer_label)
+            # Updated btn_style with centered text
             btn_style = f"""
                 height:60px;width:100px;font-size:1.5em;font-weight:bold;
                 background-color:{'#FFD700' if highlight else color};
                 border:3px solid {'#FFD700' if highlight else '#222'};
                 border-radius:10px;
                 margin:4px 0 4px 0;
+                display:flex;
+                justify-content:center;
+                align-items:center;
+                text-align:center;
             """
             with cols[idx + 1]:
                 st.markdown(
@@ -230,6 +285,10 @@ selected_layer = st.session_state["selected_layer"]
 if selected_layer:
     layer_data = data[data["Location"] == selected_layer].reset_index(drop=True)
     st.markdown(f"## Items in **{selected_layer}**")
+
+    # 1. Unsaved Changes Indicator - MOVED ABOVE EXCEL CHART
+    if not st.session_state.get("changes_saved", True):
+        st.warning("⚠️ You have unsaved changes in the current layer!")
 
     if layer_data.empty:
         st.info("No items in this layer. Add new items below:")
@@ -270,7 +329,7 @@ if selected_layer:
         st.markdown("**Features available:**")
         st.markdown("- ✏️ **Edit cells directly** by double-clicking")
         st.markdown("- 🔍 **Filter and sort** using column headers")
-        st.markdown("- ☑️ **Select multiple rows** using checkboxes")
+        st.markdown("- ☑️ **Select multiple rows** using checkboxes for deletion")
         st.markdown("- 📄 **Pagination** for large datasets")
         st.markdown("- 💾 **Auto-save** when switching layers or downloading")
         
@@ -289,35 +348,98 @@ if selected_layer:
         # Store current grid data for auto-saving
         st.session_state["current_grid_data"] = grid_response['data']
         
+        # Store selected rows for deletion
+        selected_rows = grid_response['selected_rows']
+        if selected_rows:
+            st.session_state["selected_rows_for_deletion"] = selected_rows
+        
         # Check if data has changed and mark accordingly
         if not grid_response['data'].equals(layer_data):
             st.session_state["changes_saved"] = False
         
-        selected_rows = grid_response['selected_rows']
-        
         # Show selected rows info
         if selected_rows:
-            st.info(f"Selected {len(selected_rows)} row(s)")
+            st.info(f"Selected {len(selected_rows)} row(s) - Use Delete button to remove them")
 
-    # --- Add New Item Button ---
-    if st.button("➕ Add New Item", key=f"add_item_{selected_layer}"):
-        # Ensure changes are saved first
-        ensure_changes_saved()
-        
-        new_row = pd.DataFrame({
-            "Location": [selected_layer],
-            "Description": ["New Item"],
-            "Unit": [""],
-            "Model": [""],
-            "SN/Lot": [""],
-            "Remark": [""],
-            "Image_URL": [""]
-        })
-        st.session_state["inventory_data"] = pd.concat([st.session_state["inventory_data"], new_row], ignore_index=True)
-        st.success("✅ New item added!")
-        st.rerun()
+    # 4. Action Buttons - MOVED BELOW CHART AND ABOVE GALLERY
+    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+    
+    with col1:
+        if st.button("💾 Save Changes", key=f"save_{selected_layer}"):
+            saved = ensure_changes_saved()
+            if saved:
+                st.success("✅ Changes saved successfully!")
+            else:
+                st.info("ℹ️ No changes to save.")
+            st.rerun()
 
-    # --- Gallery: Multiple images per row, fixed width 200px ---
+    with col2:
+        if st.button("🔄 Refresh Layer", key=f"refresh_{selected_layer}"):
+            # Ensure changes are saved before refresh
+            ensure_changes_saved()
+            st.rerun()
+
+    with col3:
+        if st.button("➕ Add New Item", key=f"add_item_{selected_layer}"):
+            # Ensure changes are saved first
+            ensure_changes_saved()
+            
+            new_row = pd.DataFrame({
+                "Location": [selected_layer],
+                "Description": ["New Item"],
+                "Unit": [""],
+                "Model": [""],
+                "SN/Lot": [""],
+                "Remark": [""],
+                "Image_URL": [""]
+            })
+            st.session_state["inventory_data"] = pd.concat([st.session_state["inventory_data"], new_row], ignore_index=True)
+            st.success("✅ New item added!")
+            st.rerun()
+
+    with col4:
+        # NEW: Delete Selected Rows Button
+        if st.button("🗑️ Delete Selected", key=f"delete_selected_{selected_layer}"):
+            if "selected_rows_for_deletion" in st.session_state and st.session_state["selected_rows_for_deletion"]:
+                deleted_count = delete_selected_rows()
+                if deleted_count > 0:
+                    st.success(f"✅ Deleted {deleted_count} row(s) successfully!")
+                    st.rerun()
+                else:
+                    st.warning("⚠️ No rows were deleted.")
+            else:
+                st.warning("⚠️ Please select rows to delete first by checking the checkboxes in the grid.")
+
+    with col5:
+        # Modified download button with ensure_changes_saved()
+        if st.button("📥 Download File", key=f"download_btn_{selected_layer}"):
+            # Ensure changes are saved first
+            saved = ensure_changes_saved()
+            if saved:
+                st.success("✅ Changes saved before download!")
+            
+            # Then proceed with download
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                st.session_state["inventory_data"].to_excel(writer, index=False)
+            output.seek(0)
+            
+            st.download_button(
+                label="📥 Download Now",
+                data=output,
+                file_name=f"updated_inventory_{int(time.time())}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"actual_download_{selected_layer}"
+            )
+
+    # Confirmation dialog for deletion (optional enhancement)
+    if st.session_state.get("selected_rows_for_deletion"):
+        with st.expander("🔍 Preview Selected Rows for Deletion"):
+            selected_df = pd.DataFrame(st.session_state["selected_rows_for_deletion"])
+            st.dataframe(selected_df[["Description", "Unit", "Model", "SN/Lot"]], use_container_width=True)
+            st.warning("⚠️ These rows will be permanently deleted when you click 'Delete Selected'")
+
+    # 3. Gallery with Centered Images - MOVED BELOW BUTTONS
     if not layer_data.empty:
         st.markdown("### 🖼️ Image Gallery for this shelf layer:")
         images_per_row = 5
@@ -342,6 +464,8 @@ if selected_layer:
                     new_height = int(h * (new_width / w))
                     img_resized = img.resize((new_width, new_height))
                     with col:
+                        # 3. Center-aligned images and text
+                        st.markdown("<div style='text-align:center;'>", unsafe_allow_html=True)
                         st.image(img_resized, use_container_width=False)
                         st.markdown(
                             f"""
@@ -352,8 +476,11 @@ if selected_layer:
                             """,
                             unsafe_allow_html=True
                         )
+                        st.markdown("</div>", unsafe_allow_html=True)
                 except Exception:
                     with col:
+                        # 3. Center-aligned placeholder images and text
+                        st.markdown("<div style='text-align:center;'>", unsafe_allow_html=True)
                         st.image(PLACEHOLDER_IMAGE, use_container_width=False)
                         st.markdown(
                             f"""
@@ -364,46 +491,7 @@ if selected_layer:
                             """,
                             unsafe_allow_html=True
                         )
-
-    # --- Action Buttons ---
-    col1, col2, col3 = st.columns([1, 1, 1])
-    
-    with col1:
-        if st.button("💾 Save Changes", key=f"save_{selected_layer}"):
-            saved = ensure_changes_saved()
-            if saved:
-                st.success("✅ Changes saved successfully!")
-            else:
-                st.info("ℹ️ No changes to save.")
-            st.rerun()
-
-    with col2:
-        if st.button("🔄 Refresh Layer", key=f"refresh_{selected_layer}"):
-            # Ensure changes are saved before refresh
-            ensure_changes_saved()
-            st.rerun()
-
-    with col3:
-        # Modified download button with ensure_changes_saved()
-        if st.button("📥 Download Updated Excel File", key=f"download_btn_{selected_layer}"):
-            # Ensure changes are saved first
-            saved = ensure_changes_saved()
-            if saved:
-                st.success("✅ Changes saved before download!")
-            
-            # Then proceed with download
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                st.session_state["inventory_data"].to_excel(writer, index=False)
-            output.seek(0)
-            
-            st.download_button(
-                label="📥 Download Now",
-                data=output,
-                file_name=f"updated_inventory_{int(time.time())}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"actual_download_{selected_layer}"
-            )
+                        st.markdown("</div>", unsafe_allow_html=True)
 
 else:
     st.info("👆 Click a shelf layer above to view its items.")
@@ -453,6 +541,7 @@ if st.checkbox("Show Debug Info"):
     st.write("Selected Layer:", st.session_state.get("selected_layer"))
     st.write("Changes Saved:", st.session_state.get("changes_saved"))
     st.write("Has Current Grid Data:", "current_grid_data" in st.session_state)
+    st.write("Selected Rows for Deletion:", len(st.session_state.get("selected_rows_for_deletion", [])))
     if st.session_state.get("last_save_time"):
         last_save = time.strftime("%H:%M:%S", time.localtime(st.session_state["last_save_time"]))
         st.write("Last Save Time:", last_save)
