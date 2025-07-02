@@ -162,12 +162,29 @@ for img_row in img_rows:
             new_height = int(h * (new_width / w))
             img_resized = img.resize((new_width, new_height))
             with col:
-                st.image(img_resized, caption=row["Description"], use_container_width=False)
-                st.markdown(f"<div style='text-align:center;'>Unit: <b>{row['Unit']}</b></div>", unsafe_allow_html=True)
+                st.image(img_resized, use_container_width=False)
+                st.markdown(
+                    f"""
+                    <div style='text-align:center; font-family: Arial, sans-serif; font-size: 1.1em;'>
+                        <b>{row['Description']}</b><br>
+                        Unit: <b>{row['Unit']}</b>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
         except Exception:
             with col:
-                st.image(PLACEHOLDER_IMAGE, caption=row["Description"], use_container_width=False)
-                st.markdown(f"<div style='text-align:center;'>Unit: <b>{row['Unit']}</b></div>", unsafe_allow_html=True)
+                st.image(PLACEHOLDER_IMAGE, use_container_width=False)
+                st.markdown(
+                    f"""
+                    <div style='text-align:center; font-family: Arial, sans-serif; font-size: 1.1em;'>
+                        <b>{row['Description']}</b><br>
+                        Unit: <b>{row['Unit']}</b>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
                 
     # --- Save Logic ---
     if st.button("Save Changes"):
