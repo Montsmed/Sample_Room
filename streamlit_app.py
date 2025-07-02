@@ -66,6 +66,22 @@ def load_data(uploaded_file):
     df.columns = ["Location", "Description", "Unit", "Model", "SN/Lot", "Remark", "Image_URL"]
     return df
 
+def get_all_edited_data(data):
+    edited_layers = []
+    for key in st.session_state.keys():
+        if key.startswith("temp_edits_"):
+            layer = key.replace("temp_edits_", "")
+            temp_df = st.session_state[key]
+            if not temp_df.empty:
+                temp_df = temp_df.copy()
+                temp_df["Location"] = layer
+                edited_layers.append(temp_df)
+    if edited_layers:
+        edited_df = pd.concat(edited_layers, ignore_index=True)
+        data = data[~data["Location"].isin(edited_df["Location"])]
+        data = pd.concat([data, edited_df], ignore_index=True)
+    return data
+
 st.set_page_config(page_title="Inventory Visual Manager", layout="wide")
 st.title("📦 Visual Inventory Management System")
 
@@ -290,3 +306,20 @@ if selected_layer:
         )
 else:
     st.info("Click a shelf layer above to view its items.")
+
+# --- GLOBAL DOWNLOAD BUTTON ---
+st.markdown("---")
+st.markdown("### 📥 Download Inventory Including All Unsaved Edits")
+
+if st.button("Download All Changes (Global)", key="download_all"):
+    global_data = get_all_edited_data(data)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        global_data.to_excel(writer, index=False)
+    output.seek(0)
+    st.download_button(
+        label="Download All Inventory Data (with Unsaved Edits)",
+        data=output,
+        file_name="inventory_with_all_edits.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
