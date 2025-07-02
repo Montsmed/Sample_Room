@@ -17,22 +17,22 @@ SHELVES = {
 SHELF_ORDER = ["A", "B", "C", "D", "E"]
 LAYER_ORDER = [4, 3, 2, 1]  # Top to bottom
 
-# Define two color schemes
+# Color schemes
 LIGHT_SHELF_COLORS = {
-    "A": "#ADD8E6",  # light blue
-    "B": "#90EE90",  # light green
-    "C": "#FFFFE0",  # light yellow
-    "D": "#F08080",  # light coral
-    "E": "#EE82EE",  # violet
+    "A": "#ADD8E6",
+    "B": "#90EE90",
+    "C": "#FFFFE0",
+    "D": "#F08080",
+    "E": "#EE82EE",
 }
 LIGHT_FONT_COLOR = "#222"
 
 DARK_SHELF_COLORS = {
-    "A": "#22577A",  # deep blue
-    "B": "#38A3A5",  # teal
-    "C": "#57CC99",  # green
-    "D": "#F3722C",  # orange
-    "E": "#C44536",  # red
+    "A": "#22577A",
+    "B": "#38A3A5",
+    "C": "#57CC99",
+    "D": "#F3722C",
+    "E": "#C44536",
 }
 DARK_FONT_COLOR = "#F3F3F3"
 LIGHT_GREY_DARK_MODE = '#D3D3D3'
@@ -177,79 +177,94 @@ if selected_layer:
     if layer_data.empty:
         st.info("No items in this layer. Add new items below:")
         empty_df = pd.DataFrame(columns=data.columns)
-        edited_data = st.data_editor(
-            empty_df,
-            num_rows="dynamic",
-            use_container_width=True,
-            key=f"editor_{selected_layer}"
-        )
     else:
-        # Data editor first (include Image_URL column)
-        edited_data = st.data_editor(
-            layer_data,
-            num_rows="dynamic",
-            use_container_width=True,
-            key=f"editor_{selected_layer}"
-        )
+        empty_df = None
 
-        # --- Gallery: Multiple images per row, fixed width 200px ---
-        st.markdown("### Images in this shelf layer:")
-        images_per_row = 5  # Number of images per row
-        PLACEHOLDER_IMAGE = "https://github.com/Montsmed/Sample_Room/raw/main/No_Image.jpg"
-        img_rows = [
-            layer_data.iloc[i:i+images_per_row]
-            for i in range(0, len(layer_data), images_per_row)
-        ]
-        for img_row in img_rows:
-            cols = st.columns(len(img_row))
-            for col, (_, row) in zip(cols, img_row.iterrows()):
-                image_url = str(row["Image_URL"]).strip()
-                if not image_url or image_url.lower() == "nan":
-                    image_url = PLACEHOLDER_IMAGE
-                try:
-                    response = requests.get(image_url)
-                    img = Image.open(BytesIO(response.content))
-                    w, h = img.size
-                    new_width = 200
-                    new_height = int(h * (new_width / w))
-                    img_resized = img.resize((new_width, new_height))
-                    buf = BytesIO()
-                    img_resized.save(buf, format="PNG")
-                    img_base64 = base64.b64encode(buf.getvalue()).decode()
-                    img_html = f"""
+    # Unique editor key for persistence
+    editor_key = f"editor_{selected_layer}"
+
+    # Load data for editor: from session_state if exists, else from DataFrame or empty
+    if editor_key in st.session_state:
+        editor_data = st.session_state[editor_key]
+    else:
+        editor_data = empty_df if empty_df is not None else layer_data.copy()
+
+    # Show editor
+    edited_data = st.data_editor(
+        editor_data,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=editor_key
+    )
+
+    # Save edits to session_state on every rerun
+    st.session_state[editor_key] = edited_data
+
+    # --- Gallery: Multiple images per row, fixed width 200px ---
+    st.markdown("### Images in this shelf layer:")
+    images_per_row = 5  # Number of images per row
+    PLACEHOLDER_IMAGE = "https://github.com/Montsmed/Sample_Room/raw/main/No_Image.jpg"
+    img_rows = [
+        edited_data.iloc[i:i+images_per_row]
+        for i in range(0, len(edited_data), images_per_row)
+    ]
+    for img_row in img_rows:
+        cols = st.columns(len(img_row))
+        for col, (_, row) in zip(cols, img_row.iterrows()):
+            image_url = str(row["Image_URL"]).strip()
+            if not image_url or image_url.lower() == "nan":
+                image_url = PLACEHOLDER_IMAGE
+            try:
+                response = requests.get(image_url)
+                img = Image.open(BytesIO(response.content))
+                w, h = img.size
+                new_width = 200
+                new_height = int(h * (new_width / w))
+                img_resized = img.resize((new_width, new_height))
+                buf = BytesIO()
+                img_resized.save(buf, format="PNG")
+                img_base64 = base64.b64encode(buf.getvalue()).decode()
+                img_html = f"""
+                    <div style='text-align:center;'>
+                        <img src='data:image/png;base64,{img_base64}' width='200'/><br>
+                        <div style='font-family: Arial, sans-serif; font-size: 1.1em; color:{FONT_COLOR};'>
+                            <b>{row['Description']}</b><br>
+                            Unit: <b>{row['Unit']}</b>
+                        </div>
+                    </div>
+                """
+                with col:
+                    st.markdown(img_html, unsafe_allow_html=True)
+            except Exception:
+                with col:
+                    st.markdown(
+                        f"""
                         <div style='text-align:center;'>
-                            <img src='data:image/png;base64,{img_base64}' width='200'/><br>
+                            <img src='{PLACEHOLDER_IMAGE}' width='200'/><br>
                             <div style='font-family: Arial, sans-serif; font-size: 1.1em; color:{FONT_COLOR};'>
                                 <b>{row['Description']}</b><br>
                                 Unit: <b>{row['Unit']}</b>
                             </div>
                         </div>
-                    """
-                    with col:
-                        st.markdown(img_html, unsafe_allow_html=True)
-                except Exception:
-                    with col:
-                        st.markdown(
-                            f"""
-                            <div style='text-align:center;'>
-                                <img src='{PLACEHOLDER_IMAGE}' width='200'/><br>
-                                <div style='font-family: Arial, sans-serif; font-size: 1.1em; color:{FONT_COLOR};'>
-                                    <b>{row['Description']}</b><br>
-                                    Unit: <b>{row['Unit']}</b>
-                                </div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
+                        """,
+                        unsafe_allow_html=True
+                    )
 
     # --- Save Logic ---
     if st.button("Save Changes", key=f"save_{selected_layer}"):
-        if layer_data.empty and not edited_data.empty:
+        if empty_df is not None and not edited_data.empty:
             edited_data["Location"] = selected_layer
+            # Remove old entries for this shelf
+            data = data[data["Location"] != selected_layer]
+            # Append new entries
             data = pd.concat([data, edited_data], ignore_index=True)
             st.success(f"Added {len(edited_data)} new items to {selected_layer}!")
         else:
-            data.update(edited_data)
+            # Update existing data
+            for idx, row in edited_data.iterrows():
+                data_idx = data[(data["Location"] == selected_layer) & (data.index == row.name)].index
+                if not data_idx.empty:
+                    data.loc[data_idx, :] = row
             st.success("Changes saved!")
         
         output = io.BytesIO()
