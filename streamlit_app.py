@@ -38,7 +38,7 @@ st.title("📦 Visual Inventory Management System")
 # --- Robust Image Loading from Local or GitHub ---
 def load_shelf_image():
     image_path = "Sampleroom.png"
-    image_url = "https://github.com/HowardChu/PyCharmMiscProject/raw/main/Sampleroom.png"
+    image_url = "https://github.com/Montsmed/Sample_Room/blob/main/Sampleroom.png"
     
     try:
         # First try local file
