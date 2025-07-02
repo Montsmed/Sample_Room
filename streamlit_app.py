@@ -6,6 +6,8 @@ from PIL import Image
 from io import BytesIO
 import base64
 
+from st_aggrid import AgGrid, GridOptionsBuilder
+
 # --- Shelf and Layer Definitions ---
 SHELVES = {
     "A": [1, 2, 3],
@@ -216,15 +218,23 @@ if selected_layer:
         else:
             st.session_state[layer_key] = pd.DataFrame(columns=data.columns)
 
-    # Use session state as single source of truth for editor
-    editor_value = st.session_state[layer_key]
+    # Use AgGrid for editing
+    editor_value = st.session_state[layer_key].copy()
+    gb = GridOptionsBuilder.from_dataframe(editor_value)
+    gb.configure_default_column(editable=True, resizable=True)
+    gb.configure_pagination(enabled=True, paginationPageSize=10)
+    grid_options = gb.build()
 
-    edited_data = st.data_editor(
+    grid_response = AgGrid(
         editor_value,
-        num_rows="dynamic",
-        use_container_width=True,
-        key=f"editor_{selected_layer}"
+        gridOptions=grid_options,
+        update_mode='MODEL_CHANGED',
+        allow_unsafe_jscode=True,
+        height=400,
+        fit_columns_on_grid_load=True
     )
+    edited_data = pd.DataFrame(grid_response['data'])
+
     # Only update temp memory, do NOT touch main_data or rerun
     st.session_state[layer_key] = ensure_dataframe(edited_data, data.columns)
 
