@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import requests
 from PIL import Image
-from urllib.request import urlopen
+from io import BytesIO
 
 # --- Shelf and Layer Definitions ---
 SHELVES = {
@@ -28,7 +28,6 @@ SHELF_COLORS = {
 def load_data(uploaded_file):
     in_mem_file = io.BytesIO(uploaded_file.read())
     df = pd.read_excel(in_mem_file, engine="openpyxl")
-    # Read columns A-G (7 columns)
     df = df.iloc[:, :7]
     df.columns = ["Location", "Description", "Unit", "Model", "SN/Lot", "Remark", "Image_URL"]
     return df
@@ -36,18 +35,17 @@ def load_data(uploaded_file):
 st.set_page_config(page_title="Inventory Visual Manager", layout="wide")
 st.title("📦 Visual Inventory Management System")
 
-# --- Image Loading ---
+# --- Robust Image Loading for the Shelf Overview Image ---
 def load_shelf_image():
     image_path = "Sampleroom.png"
     image_url = "https://github.com/Montsmed/Sample_Room/raw/main/Sampleroom.png"
-    
     try:
         img = Image.open(image_path)
         w, h = img.size
         return img.resize((w // 2, h // 2))
     except:
         try:
-            img = Image.open(urlopen(image_url))
+            img = Image.open(requests.get(image_url, stream=True).raw)
             w, h = img.size
             return img.resize((w // 2, h // 2))
         except:
@@ -67,8 +65,9 @@ if not uploaded_file:
 uploaded_file.seek(0)
 data = load_data(uploaded_file)
 
-# --- Search Functionality ---
+# --- Enhanced Search (B, D, E, Model) ---
 search_query = st.text_input("🔎 Search items by Description, Unit, Model, or SN/Lot (partial match):")
+
 if search_query:
     filtered_data = data[
         data["Description"].astype(str).str.contains(search_query, case=False, na=False) |
@@ -84,7 +83,7 @@ if search_query:
 
 st.markdown("### Click a shelf layer to view/edit its items:")
 
-# --- Interactive Shelf Grid ---
+# --- Interactive Shelf Grid with instant highlight ---
 if "selected_layer" not in st.session_state:
     st.session_state["selected_layer"] = None
 if "selected_row" not in st.session_state:
@@ -137,49 +136,35 @@ if selected_layer:
             key=f"editor_{selected_layer}"
         )
     else:
-        # Display clickable table
-        st.markdown("**Click on a description to view its image**")
-        
-        # Create a copy for display (to show clickable descriptions)
-        display_df = layer_data.copy()
-        display_df["Description"] = display_df["Description"].apply(
-            lambda x: f"<a href='#' onclick='return false;'>{x}</a>"
-        )
-        
-        # Display as HTML to make descriptions clickable
-        st.markdown(
-            display_df[["Description", "Unit", "Model", "SN/Lot", "Remark"]].to_html(escape=False, index=False),
-            unsafe_allow_html=True
-        )
-        
-        # Create a row selection widget
+        st.markdown("**Select an item to view its image**")
         row_idx = st.selectbox(
             "Select an item to view its image:",
             options=range(len(layer_data)),
             format_func=lambda x: layer_data.iloc[x]["Description"],
             key=f"row_select_{selected_layer}"
         )
-        
-        # Store selected row in session state
         if row_idx is not None:
             st.session_state["selected_row"] = row_idx
-            
+
         # Show image for selected row
         if st.session_state["selected_row"] is not None:
             row = layer_data.iloc[st.session_state["selected_row"]]
             image_url = str(row["Image_URL"]).strip()
-            st.write("Debug: Image_URL value is", image_url)  # For debugging
             if image_url and image_url.lower() != "nan":
                 try:
-                    st.image(image_url, caption=f"Image for {row['Description']}")
-                except Exception as e:
-                    st.error(f"Could not load image: {e}")
+                    response = requests.get(image_url)
+                    img = Image.open(BytesIO(response.content))
+                    w, h = img.size
+                    img_resized = img.resize((w // 2, h // 2))
+                    st.image(img_resized, caption=f"Image for {row['Description']}", use_container_width=False)
+                except Exception:
+                    st.info("Image could not be loaded.")
             else:
                 st.info("No image available for this item.")
-        
-        # Data editor for editing
+
+        # Data editor for editing (hide Image_URL in editor)
         edited_data = st.data_editor(
-            layer_data.drop(columns=["Image_URL"]),  # Hide image URL in editor
+            layer_data.drop(columns=["Image_URL"]),
             num_rows="dynamic",
             use_container_width=True,
             key=f"editor_{selected_layer}"
