@@ -38,10 +38,8 @@ DARK_FONT_COLOR = "#F3F3F3"
 LIGHT_GREY_DARK_MODE = '#D3D3D3'
 
 def ensure_dataframe(val, columns):
-    # Already a DataFrame
     if isinstance(val, pd.DataFrame):
         return val
-    # List of dicts (common from Streamlit widgets)
     if isinstance(val, list):
         if len(val) == 0:
             return pd.DataFrame(columns=columns)
@@ -49,7 +47,6 @@ def ensure_dataframe(val, columns):
             return pd.DataFrame(val)
         else:
             return pd.DataFrame(columns=columns)
-    # Dict of columns (all values should be lists or Series of same length)
     if isinstance(val, dict):
         lengths = [len(v) for v in val.values() if hasattr(v, '__len__')]
         if len(lengths) > 0 and len(set(lengths)) == 1:
@@ -59,7 +56,6 @@ def ensure_dataframe(val, columns):
                 return pd.DataFrame(columns=columns)
         else:
             return pd.DataFrame(columns=columns)
-    # Fallback: empty DataFrame
     return pd.DataFrame(columns=columns)
 
 @st.cache_data
@@ -209,20 +205,18 @@ if selected_layer:
     layer_data = data[data["Location"] == selected_layer].reset_index(drop=True)
     st.markdown(f"## Items in **{selected_layer}**")
     
-    if layer_data.empty:
-        st.info("No items in this layer. Add new items below:")
-        editor_initial = pd.DataFrame(columns=data.columns)
-    else:
-        editor_initial = layer_data.copy()
-
     persist_key = f"persisted_{selected_layer}"
     editor_key = f"editor_{selected_layer}"
 
-    # --- Robust DataFrame check for editor_value ---
+    # Always initialize from session_state if exists, else from DataFrame
     if persist_key in st.session_state:
         editor_value = ensure_dataframe(st.session_state[persist_key], data.columns)
     else:
-        editor_value = editor_initial
+        if layer_data.empty:
+            editor_value = pd.DataFrame(columns=data.columns)
+        else:
+            editor_value = layer_data.copy()
+        st.session_state[persist_key] = editor_value  # Initialize for this shelf
 
     edited_data = st.data_editor(
         editor_value,
