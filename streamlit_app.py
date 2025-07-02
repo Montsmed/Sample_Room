@@ -28,31 +28,28 @@ SHELF_COLORS = {
 def load_data(uploaded_file):
     in_mem_file = io.BytesIO(uploaded_file.read())
     df = pd.read_excel(in_mem_file, engine="openpyxl")
-    df = df.iloc[:, :6]
-    df.columns = ["Location", "Description", "Unit", "Model", "SN/Lot", "Remark"]
+    # Read columns A-G (7 columns)
+    df = df.iloc[:, :7]
+    df.columns = ["Location", "Description", "Unit", "Model", "SN/Lot", "Remark", "Image_URL"]
     return df
 
 st.set_page_config(page_title="Inventory Visual Manager", layout="wide")
 st.title("📦 Visual Inventory Management System")
 
-# --- Robust Image Loading from Local or GitHub ---
+# --- Image Loading ---
 def load_shelf_image():
     image_path = "Sampleroom.png"
     image_url = "https://github.com/Montsmed/Sample_Room/raw/main/Sampleroom.png"
     
     try:
-        # First try local file
         img = Image.open(image_path)
         w, h = img.size
-        img_resized = img.resize((w // 2, h // 2))
-        return img_resized
+        return img.resize((w // 2, h // 2))
     except:
         try:
-            # Fallback to GitHub URL
             img = Image.open(urlopen(image_url))
             w, h = img.size
-            img_resized = img.resize((w // 2, h // 2))
-            return img_resized
+            return img.resize((w // 2, h // 2))
         except:
             return None
 
@@ -70,9 +67,8 @@ if not uploaded_file:
 uploaded_file.seek(0)
 data = load_data(uploaded_file)
 
-# --- Search Box ---
+# --- Search Functionality ---
 search_query = st.text_input("🔎 Search items by Description, Unit, Model, or SN/Lot (partial match):")
-
 if search_query:
     filtered_data = data[
         data["Description"].astype(str).str.contains(search_query, case=False, na=False) |
@@ -86,9 +82,13 @@ if search_query:
         st.markdown(f"### Search Results for '{search_query}':")
         st.dataframe(filtered_data[["Location", "Description", "Unit", "Model", "SN/Lot", "Remark"]])
 
-# --- Interactive Shelf Grid with instant highlight ---
+st.markdown("### Click a shelf layer to view/edit its items:")
+
+# --- Interactive Shelf Grid ---
 if "selected_layer" not in st.session_state:
     st.session_state["selected_layer"] = None
+if "selected_row" not in st.session_state:
+    st.session_state["selected_row"] = None
 
 for layer_num in LAYER_ORDER:
     cols = st.columns(len(SHELF_ORDER) + 1)
@@ -115,7 +115,8 @@ for layer_num in LAYER_ORDER:
                 )
                 if st.button(f"Select {layer_label}", key=f"btn_{layer_label}"):
                     st.session_state["selected_layer"] = layer_label
-                    st.rerun()  # Use st.rerun() for instant update
+                    st.session_state["selected_row"] = None  # Reset row selection
+                    st.rerun()
         else:
             cols[idx + 1].markdown("")
 
@@ -125,9 +126,9 @@ selected_layer = st.session_state["selected_layer"]
 if selected_layer:
     st.markdown(f"## Items in **{selected_layer}**")
     layer_data = data[data["Location"] == selected_layer].reset_index(drop=True)
+    
     if layer_data.empty:
-        st.info("No items in this layer. You can add new items below.")
-        # Create an empty DataFrame with the same columns
+        st.info("No items in this layer. Add new items below:")
         empty_df = pd.DataFrame(columns=data.columns)
         edited_data = st.data_editor(
             empty_df,
@@ -136,50 +137,72 @@ if selected_layer:
             key=f"editor_{selected_layer}"
         )
     else:
+        # Display clickable table
+        st.markdown("**Click on a description to view its image**")
+        
+        # Create a copy for display (to show clickable descriptions)
+        display_df = layer_data.copy()
+        display_df["Description"] = display_df["Description"].apply(
+            lambda x: f"<a href='#' onclick='return false;'>{x}</a>"
+        )
+        
+        # Display as HTML to make descriptions clickable
+        st.markdown(
+            display_df[["Description", "Unit", "Model", "SN/Lot", "Remark"]].to_html(escape=False, index=False),
+            unsafe_allow_html=True
+        )
+        
+        # Create a row selection widget
+        row_idx = st.selectbox(
+            "Select an item to view its image:",
+            options=range(len(layer_data)),
+            format_func=lambda x: layer_data.iloc[x]["Description"],
+            key=f"row_select_{selected_layer}"
+        )
+        
+        # Store selected row in session state
+        if row_idx is not None:
+            st.session_state["selected_row"] = row_idx
+            
+        # Show image for selected row
+        if st.session_state["selected_row"] is not None:
+            image_url = layer_data.iloc[st.session_state["selected_row"]]["Image_URL"]
+            if pd.notna(image_url) and str(image_url).strip() != "":
+                try:
+                    st.image(image_url, caption=f"Image for {layer_data.iloc[st.session_state['selected_row']]['Description']}")
+                except:
+                    st.error("Could not load image. Invalid URL or format.")
+            else:
+                st.info("No image available for this item.")
+        
+        # Data editor for editing
         edited_data = st.data_editor(
-            layer_data,
+            layer_data.drop(columns=["Image_URL"]),  # Hide image URL in editor
             num_rows="dynamic",
             use_container_width=True,
             key=f"editor_{selected_layer}"
         )
 
-    # --- Persist changes and offer download ---
+    # --- Save Logic ---
     if st.button("Save Changes"):
-        # For empty shelves, set the Location for new rows
         if layer_data.empty and not edited_data.empty:
             edited_data["Location"] = selected_layer
             data = pd.concat([data, edited_data], ignore_index=True)
+            st.success(f"Added {len(edited_data)} new items to {selected_layer}!")
         else:
             data.update(edited_data)
-        st.success("Changes saved! You can now download the updated Excel file below.")
-
+            st.success("Changes saved!")
+        
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             data.to_excel(writer, index=False)
         output.seek(0)
-
+        
         st.download_button(
             label="Download Updated Excel File",
             data=output,
             file_name="updated_inventory.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-        # --- Persist changes and offer download ---
-        if st.button("Save Changes"):
-            data.update(edited_data)
-            st.success("Changes saved! You can now download the updated Excel file below.")
-
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                data.to_excel(writer, index=False)
-            output.seek(0)
-
-            st.download_button(
-                label="Download Updated Excel File",
-                data=output,
-                file_name="updated_inventory.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
 else:
     st.info("Click a shelf layer above to view its items.")
