@@ -143,11 +143,11 @@ if selected_layer:
         # --- Gallery: Multiple images per row, fixed width 200px ---
         st.markdown("### Images in this shelf layer:")
         images_per_row = 5  # Number of images per row
+        PLACEHOLDER_IMAGE = "https://github.com/Montsmed/Sample_Room/raw/main/No_Image.jpg"
         img_rows = [
             layer_data.iloc[i:i+images_per_row]
             for i in range(0, len(layer_data), images_per_row)
         ]
-        PLACEHOLDER_IMAGE = "https://github.com/Montsmed/Sample_Room/raw/main/No_Image.jpg"
         for img_row in img_rows:
             cols = st.columns(len(img_row))
             for col, (_, row) in zip(cols, img_row.iterrows()):
