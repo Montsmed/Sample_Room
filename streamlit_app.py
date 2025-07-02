@@ -12,12 +12,11 @@ SHELVES = {
     "B": [1, 2, 3],
     "C": [1, 2, 3, 4],
     "D": [1, 2, 3, 4],
-    "E": [4],  # Only layer 4 for E
+    "E": [4],
 }
 SHELF_ORDER = ["A", "B", "C", "D", "E"]
-LAYER_ORDER = [4, 3, 2, 1]  # Top to bottom
+LAYER_ORDER = [4, 3, 2, 1]
 
-# Color schemes
 LIGHT_SHELF_COLORS = {
     "A": "#ADD8E6",
     "B": "#90EE90",
@@ -26,7 +25,6 @@ LIGHT_SHELF_COLORS = {
     "E": "#EE82EE",
 }
 LIGHT_FONT_COLOR = "#222"
-
 DARK_SHELF_COLORS = {
     "A": "#22577A",
     "B": "#38A3A5",
@@ -108,7 +106,6 @@ def get_layer_label_color():
 SHELF_COLORS, FONT_COLOR = get_color_scheme()
 LAYER_LABEL_COLOR = get_layer_label_color()
 
-# --- Shelf overview image ---
 def load_shelf_image():
     image_path = "Sampleroom.png"
     image_url = "https://github.com/Montsmed/Sample_Room/raw/main/Sampleroom.png"
@@ -221,6 +218,9 @@ if selected_layer:
     # --- Use session state as single source of truth for editor ---
     editor_value = st.session_state[layer_key]
 
+    # --- Store row count before editing, to detect deletion ---
+    prev_row_count = len(editor_value)
+
     edited_data = st.data_editor(
         editor_value,
         num_rows="dynamic",
@@ -230,6 +230,10 @@ if selected_layer:
 
     # --- Always update temp memory with latest edits ---
     st.session_state[layer_key] = ensure_dataframe(edited_data, data.columns)
+
+    # --- Force rerun if a row was deleted (fixes double-delete issue) ---
+    if len(edited_data) < prev_row_count:
+        st.rerun()
 
     # --- Gallery: Multiple images per row, fixed width 200px ---
     st.markdown("### Images in this shelf layer:")
@@ -311,15 +315,16 @@ else:
 st.markdown("---")
 st.markdown("### 📥 Download Inventory Including All Unsaved Edits")
 
-if st.button("Download All Changes (Global)", key="download_all"):
-    global_data = get_all_edited_data(data)
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        global_data.to_excel(writer, index=False)
-    output.seek(0)
-    st.download_button(
-        label="Download All Inventory Data (with Unsaved Edits)",
-        data=output,
-        file_name="inventory_with_all_edits.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+# Always show the download button, and prepare the file on every run
+global_data = get_all_edited_data(data)
+output = io.BytesIO()
+with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    global_data.to_excel(writer, index=False)
+output.seek(0)
+
+st.download_button(
+    label="Download All Inventory Data (with Unsaved Edits)",
+    data=output,
+    file_name="inventory_with_all_edits.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
