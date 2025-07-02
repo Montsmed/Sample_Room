@@ -78,7 +78,7 @@ if search_query:
         st.info("No items found matching your search.")
     else:
         st.markdown(f"### Search Results for '{search_query}':")
-        st.dataframe(filtered_data[["Location", "Description", "Unit", "Model", "SN/Lot", "Remark"]])
+        st.dataframe(filtered_data[["Location", "Description", "Unit", "Model", "SN/Lot", "Remark", "Image_URL"]])
 
 st.markdown("### Click a shelf layer to view/edit its items:")
 
@@ -132,9 +132,9 @@ if selected_layer:
             key=f"editor_{selected_layer}"
         )
     else:
-        # Data editor first (hide Image_URL in editor)
+        # Data editor includes Image_URL column for editing
         edited_data = st.data_editor(
-            layer_data.drop(columns=["Image_URL"]),
+            layer_data,  # include all columns including Image_URL
             num_rows="dynamic",
             use_container_width=True,
             key=f"editor_{selected_layer}"
