@@ -112,7 +112,7 @@ def save_edits_before_switch():
         if edited_key in st.session_state:
             st.session_state[original_key] = st.session_state[edited_key].copy()
 
-layer_labels = [f"{shelf}{layer}" for layer in SHELF_ORDER for layer in LAYER_ORDER if layer in SHELVES[shelf]]
+layer_labels = [f"{shelf}{layer}" for shelf in SHELF_ORDER for layer in LAYER_ORDER if layer in SHELVES[shelf]]
 if "selected_layer" not in st.session_state:
     st.session_state["selected_layer"] = layer_labels[0]
 
