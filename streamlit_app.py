@@ -25,67 +25,40 @@ SHELF_COLORS = {
     "E": "#EE82EE",  # violet
 }
 
-# --- Centralized Save Function ---
-def auto_save_current_changes():
-    """Centralized function to automatically save any pending changes from AgGrid"""
-    try:
-        current_layer = st.session_state.get("selected_layer")
-        if not current_layer:
-            return False
+# --- Method 4: Complete Integration with ensure_changes_saved() ---
+def ensure_changes_saved():
+    """Ensure any pending AgGrid changes are saved before proceeding"""
+    current_layer = st.session_state.get("selected_layer")
+    if current_layer and "current_grid_data" in st.session_state:
+        try:
+            # Get current grid data
+            current_data = st.session_state["current_grid_data"]
             
-        # Check if there are pending changes for the current layer
-        grid_key = f"grid_data_{current_layer}"
-        if grid_key in st.session_state and st.session_state.get("has_unsaved_changes", False):
-            # Get the latest data from AgGrid
-            edited_data = st.session_state[grid_key]
+            # Update main inventory data
+            st.session_state["inventory_data"] = st.session_state["inventory_data"][
+                st.session_state["inventory_data"]["Location"] != current_layer
+            ]
             
-            if edited_data is not None and not edited_data.empty:
-                # Remove old data for this location
-                st.session_state["inventory_data"] = st.session_state["inventory_data"][
-                    st.session_state["inventory_data"]["Location"] != current_layer
-                ]
-                
-                # Ensure location is set correctly for all rows
-                edited_data_copy = edited_data.copy()
-                edited_data_copy["Location"] = current_layer
-                
-                # Add updated data
+            if current_data is not None and not current_data.empty:
+                current_data_copy = current_data.copy()
+                current_data_copy["Location"] = current_layer
                 st.session_state["inventory_data"] = pd.concat([
                     st.session_state["inventory_data"], 
-                    edited_data_copy
+                    current_data_copy
                 ], ignore_index=True)
-                
-                # Clear pending changes flag
-                st.session_state["has_unsaved_changes"] = False
-                st.session_state["last_save_time"] = time.time()
-                
-                return True
-        return False
-    except Exception as e:
-        st.error(f"Error saving changes: {str(e)}")
-        return False
-
-def mark_changes_pending():
-    """Mark that there are unsaved changes"""
-    st.session_state["has_unsaved_changes"] = True
-    st.session_state["last_edit_time"] = time.time()
-
-def safe_navigate_to_layer(new_layer):
-    """Safely navigate to a new layer after saving current changes"""
-    # Save current changes before switching
-    saved = auto_save_current_changes()
-    if saved:
-        st.success(f"✅ Changes saved before switching to {new_layer}")
-    
-    # Clear the grid data for the previous layer to avoid conflicts
-    if st.session_state.get("selected_layer"):
-        old_grid_key = f"grid_data_{st.session_state['selected_layer']}"
-        if old_grid_key in st.session_state:
-            del st.session_state[old_grid_key]
-    
-    # Set new selected layer
-    st.session_state["selected_layer"] = new_layer
-    st.session_state["has_unsaved_changes"] = False
+            
+            # Clear the current grid data to prevent conflicts
+            del st.session_state["current_grid_data"]
+            
+            # Update save status
+            st.session_state["last_save_time"] = time.time()
+            st.session_state["changes_saved"] = True
+            
+            return True
+        except Exception as e:
+            st.error(f"Error saving changes: {str(e)}")
+            return False
+    return False
 
 @st.cache_data
 def load_data(uploaded_file):
@@ -131,12 +104,12 @@ def initialize_session_state():
         st.session_state["inventory_data"] = None
     if "selected_layer" not in st.session_state:
         st.session_state["selected_layer"] = None
-    if "has_unsaved_changes" not in st.session_state:
-        st.session_state["has_unsaved_changes"] = False
+    if "current_grid_data" not in st.session_state:
+        st.session_state["current_grid_data"] = None
     if "last_save_time" not in st.session_state:
         st.session_state["last_save_time"] = None
-    if "last_edit_time" not in st.session_state:
-        st.session_state["last_edit_time"] = None
+    if "changes_saved" not in st.session_state:
+        st.session_state["changes_saved"] = True
 
 # --- Main App Configuration ---
 st.set_page_config(page_title="Inventory Visual Manager", layout="wide")
@@ -181,8 +154,8 @@ if st.session_state["inventory_data"] is None:
 data = st.session_state["inventory_data"]
 
 # --- Unsaved Changes Indicator ---
-if st.session_state.get("has_unsaved_changes", False):
-    st.warning("⚠️ You have unsaved changes!")
+if not st.session_state.get("changes_saved", True):
+    st.warning("⚠️ You have unsaved changes in the current layer!")
 
 # --- Search ---
 search_query = st.text_input("🔎 Search items by Description, Unit, Model, or SN/Lot (partial match):")
@@ -238,9 +211,15 @@ for layer_num in LAYER_ORDER:
                     f"<div style='{btn_style}'>{layer_label}</div>",
                     unsafe_allow_html=True
                 )
-                # Use callback function for automatic saving before navigation
+                # Modified shelf selection with ensure_changes_saved()
                 if st.button(f"Select {layer_label}", key=f"btn_{layer_label}"):
-                    safe_navigate_to_layer(layer_label)
+                    # Save current changes before switching
+                    saved = ensure_changes_saved()
+                    if saved:
+                        st.success(f"✅ Changes saved before switching to {layer_label}")
+                    
+                    st.session_state["selected_layer"] = layer_label
+                    st.session_state["changes_saved"] = True
                     st.rerun()
         else:
             cols[idx + 1].markdown("")
@@ -278,10 +257,12 @@ if selected_layer:
             key=f"empty_grid_{selected_layer}"
         )
         
-        # Store grid data and mark changes
+        # Store current grid data for auto-saving
+        st.session_state["current_grid_data"] = grid_response['data']
+        
+        # Mark changes as unsaved if data changed
         if not grid_response['data'].equals(empty_df):
-            st.session_state[f"grid_data_{selected_layer}"] = grid_response['data']
-            mark_changes_pending()
+            st.session_state["changes_saved"] = False
     else:
         # Configure AgGrid for existing data
         layer_grid_options = configure_aggrid_options(layer_data)
@@ -305,13 +286,12 @@ if selected_layer:
             fit_columns_on_grid_load=True
         )
         
-        # Store grid data and track changes
-        current_grid_data = grid_response['data']
-        st.session_state[f"grid_data_{selected_layer}"] = current_grid_data
+        # Store current grid data for auto-saving
+        st.session_state["current_grid_data"] = grid_response['data']
         
-        # Check if data has changed
-        if not current_grid_data.equals(layer_data):
-            mark_changes_pending()
+        # Check if data has changed and mark accordingly
+        if not grid_response['data'].equals(layer_data):
+            st.session_state["changes_saved"] = False
         
         selected_rows = grid_response['selected_rows']
         
@@ -321,8 +301,8 @@ if selected_layer:
 
     # --- Add New Item Button ---
     if st.button("➕ Add New Item", key=f"add_item_{selected_layer}"):
-        # Auto-save current changes first
-        auto_save_current_changes()
+        # Ensure changes are saved first
+        ensure_changes_saved()
         
         new_row = pd.DataFrame({
             "Location": [selected_layer],
@@ -389,8 +369,8 @@ if selected_layer:
     col1, col2, col3 = st.columns([1, 1, 1])
     
     with col1:
-        if st.button("💾 Save Changes Now", key=f"manual_save_{selected_layer}"):
-            saved = auto_save_current_changes()
+        if st.button("💾 Save Changes", key=f"save_{selected_layer}"):
+            saved = ensure_changes_saved()
             if saved:
                 st.success("✅ Changes saved successfully!")
             else:
@@ -399,26 +379,26 @@ if selected_layer:
 
     with col2:
         if st.button("🔄 Refresh Layer", key=f"refresh_{selected_layer}"):
-            # Auto-save before refresh
-            auto_save_current_changes()
+            # Ensure changes are saved before refresh
+            ensure_changes_saved()
             st.rerun()
 
     with col3:
-        # --- Download with Auto-Save ---
-        if st.button("📥 Download Updated File", key=f"download_btn_{selected_layer}"):
-            # Auto-save current changes before download
-            saved = auto_save_current_changes()
+        # Modified download button with ensure_changes_saved()
+        if st.button("📥 Download Updated Excel File", key=f"download_btn_{selected_layer}"):
+            # Ensure changes are saved first
+            saved = ensure_changes_saved()
             if saved:
                 st.success("✅ Changes saved before download!")
             
-            # Prepare download
+            # Then proceed with download
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 st.session_state["inventory_data"].to_excel(writer, index=False)
             output.seek(0)
             
             st.download_button(
-                label="📥 Click to Download",
+                label="📥 Download Now",
                 data=output,
                 file_name=f"updated_inventory_{int(time.time())}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -469,9 +449,10 @@ if st.session_state.get("last_save_time"):
 # --- Debug Information (Optional - remove in production) ---
 if st.checkbox("Show Debug Info"):
     st.markdown("### Debug Information")
-    st.write("Session State Keys:", list(st.session_state.keys()))
+    st.write("Session State Keys:", [k for k in st.session_state.keys() if not k.startswith('FormSubmitter')])
     st.write("Selected Layer:", st.session_state.get("selected_layer"))
-    st.write("Has Unsaved Changes:", st.session_state.get("has_unsaved_changes"))
-    if st.session_state.get("last_edit_time"):
-        last_edit = time.strftime("%H:%M:%S", time.localtime(st.session_state["last_edit_time"]))
-        st.write("Last Edit Time:", last_edit)
+    st.write("Changes Saved:", st.session_state.get("changes_saved"))
+    st.write("Has Current Grid Data:", "current_grid_data" in st.session_state)
+    if st.session_state.get("last_save_time"):
+        last_save = time.strftime("%H:%M:%S", time.localtime(st.session_state["last_save_time"]))
+        st.write("Last Save Time:", last_save)
