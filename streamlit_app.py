@@ -172,10 +172,10 @@ if selected_layer:
             if image_url and image_url.lower() != "nan":
                 try:
                     st.image(image_url, caption=f"Image for {row['Description']}")
-            except Exception as e:
-                st.error(f"Could not load image: {e}")
-        else:
-            st.info("No image available for this item.")
+                except Exception as e:
+                    st.error(f"Could not load image: {e}")
+            else:
+                st.info("No image available for this item.")
         
         # Data editor for editing
         edited_data = st.data_editor(
