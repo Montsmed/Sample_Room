@@ -187,7 +187,7 @@ for img_row in img_rows:
 
                 
     # --- Save Logic ---
-    if st.button("Save Changes"):
+    if st.button("Save Changes", key=f"save_{selected_layer}"):
         if layer_data.empty and not edited_data.empty:
             edited_data["Location"] = selected_layer
             data = pd.concat([data, edited_data], ignore_index=True)
