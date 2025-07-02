@@ -17,23 +17,10 @@ SHELVES = {
 SHELF_ORDER = ["A", "B", "C", "D", "E"]
 LAYER_ORDER = [4, 3, 2, 1]  # Top to bottom
 
-# Color schemes
-LIGHT_SHELF_COLORS = {
-    "A": "#ADD8E6",
-    "B": "#90EE90",
-    "C": "#FFFFE0",
-    "D": "#F08080",
-    "E": "#EE82EE",
-}
+# --- Theme and Color ---
+LIGHT_SHELF_COLORS = {"A": "#ADD8E6", "B": "#90EE90", "C": "#FFFFE0", "D": "#F08080", "E": "#EE82EE"}
+DARK_SHELF_COLORS = {"A": "#22577A", "B": "#38A3A5", "C": "#57CC99", "D": "#F3722C", "E": "#C44536"}
 LIGHT_FONT_COLOR = "#222"
-
-DARK_SHELF_COLORS = {
-    "A": "#22577A",
-    "B": "#38A3A5",
-    "C": "#57CC99",
-    "D": "#F3722C",
-    "E": "#C44536",
-}
 DARK_FONT_COLOR = "#F3F3F3"
 LIGHT_GREY_DARK_MODE = '#D3D3D3'
 
@@ -99,25 +86,7 @@ if not uploaded_file:
 uploaded_file.seek(0)
 data = load_data(uploaded_file)
 
-# --- Search ---
-search_query = st.text_input("🔎 Search items by Description, Unit, Model, or SN/Lot (partial match):")
-
-if search_query:
-    filtered_data = data[
-        data["Description"].astype(str).str.contains(search_query, case=False, na=False) |
-        data["Unit"].astype(str).str.contains(search_query, case=False, na=False) |
-        data["Model"].astype(str).str.contains(search_query, case=False, na=False) |
-        data["SN/Lot"].astype(str).str.contains(search_query, case=False, na=False)
-    ]
-    if filtered_data.empty:
-        st.info("No items found matching your search.")
-    else:
-        st.markdown(f"### Search Results for '{search_query}':")
-        st.dataframe(filtered_data[["Location", "Description", "Unit", "Model", "SN/Lot", "Remark", "Image_URL"]])
-
-st.markdown("### Click a shelf layer to view/edit its items:")
-
-# --- Detect theme and set color scheme ---
+# --- Theme detection ---
 def get_color_scheme():
     try:
         theme_base = st.get_option("theme.base")
@@ -141,7 +110,26 @@ def get_layer_label_color():
 SHELF_COLORS, FONT_COLOR = get_color_scheme()
 LAYER_LABEL_COLOR = get_layer_label_color()
 
-# --- Interactive Shelf Grid with instant highlight and edit persistence ---
+# --- Search ---
+search_query = st.text_input("🔎 Search items by Description, Unit, Model, or SN/Lot (partial match):")
+if search_query:
+    filtered_data = data[
+        data["Description"].astype(str).str.contains(search_query, case=False, na=False) |
+        data["Unit"].astype(str).str.contains(search_query, case=False, na=False) |
+        data["Model"].astype(str).str.contains(search_query, case=False, na=False) |
+        data["SN/Lot"].astype(str).str.contains(search_query, case=False, na=False)
+    ]
+    if filtered_data.empty:
+        st.info("No items found matching your search.")
+    else:
+        st.markdown(f"### Search Results for '{search_query}':")
+        st.dataframe(filtered_data[["Location", "Description", "Unit", "Model", "SN/Lot", "Remark", "Image_URL"]])
+
+st.markdown("### Click a shelf layer to view/edit its items:")
+
+# --- Temp memory for unsaved edits ---
+if "temp_edits" not in st.session_state:
+    st.session_state["temp_edits"] = {}
 if "selected_layer" not in st.session_state:
     st.session_state["selected_layer"] = None
 if "last_selected_layer" not in st.session_state:
@@ -185,13 +173,10 @@ for layer_num in LAYER_ORDER:
                 )
                 if st.button(f"Select {layer_label}", key=f"btn_{layer_label}"):
                     # Save current edits before switching
-                    if st.session_state["selected_layer"]:
-                        prev_layer = st.session_state["selected_layer"]
-                        persist_key = f"persisted_{prev_layer}"
-                        editor_key = f"editor_{prev_layer}"
-                        if editor_key in st.session_state:
-                            val = st.session_state[editor_key]
-                            st.session_state[persist_key] = ensure_dataframe(val, data.columns)
+                    prev_layer = st.session_state["selected_layer"]
+                    if prev_layer and f"editor_{prev_layer}" in st.session_state:
+                        val = st.session_state[f"editor_{prev_layer}"]
+                        st.session_state["temp_edits"][prev_layer] = ensure_dataframe(val, data.columns)
                     st.session_state["last_selected_layer"] = st.session_state["selected_layer"]
                     st.session_state["selected_layer"] = layer_label
                     st.rerun()
@@ -200,23 +185,20 @@ for layer_num in LAYER_ORDER:
 
 selected_layer = st.session_state["selected_layer"]
 
-# --- Show and Edit Items in Selected Layer ---
 if selected_layer:
     layer_data = data[data["Location"] == selected_layer].reset_index(drop=True)
     st.markdown(f"## Items in **{selected_layer}**")
-    
-    persist_key = f"persisted_{selected_layer}"
     editor_key = f"editor_{selected_layer}"
 
-    # Always initialize from session_state if exists, else from DataFrame
-    if persist_key in st.session_state:
-        editor_value = ensure_dataframe(st.session_state[persist_key], data.columns)
+    # --- Load from temp memory if exists, else from DataFrame ---
+    if selected_layer in st.session_state["temp_edits"]:
+        editor_value = ensure_dataframe(st.session_state["temp_edits"][selected_layer], data.columns)
     else:
         if layer_data.empty:
             editor_value = pd.DataFrame(columns=data.columns)
         else:
             editor_value = layer_data.copy()
-        st.session_state[persist_key] = editor_value  # Initialize for this shelf
+        st.session_state["temp_edits"][selected_layer] = editor_value
 
     edited_data = st.data_editor(
         editor_value,
@@ -224,6 +206,9 @@ if selected_layer:
         use_container_width=True,
         key=editor_key
     )
+
+    # Always update temp memory with current edits
+    st.session_state["temp_edits"][selected_layer] = ensure_dataframe(edited_data, data.columns)
 
     # --- Gallery: Multiple images per row, fixed width 200px ---
     st.markdown("### Images in this shelf layer:")
@@ -277,7 +262,8 @@ if selected_layer:
 
     # --- Save Logic ---
     if st.button("Save Changes", key=f"save_{selected_layer}"):
-        st.session_state[persist_key] = ensure_dataframe(edited_data, data.columns)
+        # Save temp edits to main DataFrame
+        st.session_state["temp_edits"][selected_layer] = ensure_dataframe(edited_data, data.columns)
         data = data[data["Location"] != selected_layer]
         if not edited_data.empty:
             edited_data["Location"] = selected_layer
