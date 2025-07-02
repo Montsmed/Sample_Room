@@ -149,49 +149,49 @@ if selected_layer:
             for i in range(0, len(layer_data), images_per_row)
         ]
         for img_row in img_rows:
-    cols = st.columns(len(img_row))
-    for col, (_, row) in zip(cols, img_row.iterrows()):
-        image_url = str(row["Image_URL"]).strip()
-        if not image_url or image_url.lower() == "nan":
-            image_url = PLACEHOLDER_IMAGE
-        try:
-            response = requests.get(image_url)
-            img = Image.open(BytesIO(response.content))
-            w, h = img.size
-            new_width = 200
-            new_height = int(h * (new_width / w))
-            img_resized = img.resize((new_width, new_height))
-            # Save to buffer for HTML embedding
-            buf = BytesIO()
-            img_resized.save(buf, format="PNG")
-            img_base64 = buf.getvalue()
-            import base64
-            img_base64 = base64.b64encode(img_base64).decode()
-            img_html = f"""
-                <div style='text-align:center;'>
-                    <img src="data:image/png;base64,{img_base64}" width="200"/><br>
-                    <div style='font-family: Arial, sans-serif; font-size: 1.1em;'>
-                        <b>{row['Description']}</b><br>
-                        Unit: <b>{row['Unit']}</b>
-                    </div>
-                </div>
-            """
-            with col:
-                st.markdown(img_html, unsafe_allow_html=True)
-        except Exception:
-            with col:
-                st.markdown(
-                    f"""
-                    <div style='text-align:center;'>
-                        <img src="{PLACEHOLDER_IMAGE}" width="200"/><br>
-                        <div style='font-family: Arial, sans-serif; font-size: 1.1em;'>
-                            <b>{row['Description']}</b><br>
-                            Unit: <b>{row['Unit']}</b>
+            cols = st.columns(len(img_row))
+            for col, (_, row) in zip(cols, img_row.iterrows()):
+                image_url = str(row["Image_URL"]).strip()
+                if not image_url or image_url.lower() == "nan":
+                    image_url = PLACEHOLDER_IMAGE
+                try:
+                    response = requests.get(image_url)
+                    img = Image.open(BytesIO(response.content))
+                    w, h = img.size
+                    new_width = 200
+                    new_height = int(h * (new_width / w))
+                    img_resized = img.resize((new_width, new_height))
+                    # Save to buffer for HTML embedding
+                    buf = BytesIO()
+                    img_resized.save(buf, format="PNG")
+                    img_base64 = buf.getvalue()
+                    import base64
+                    img_base64 = base64.b64encode(img_base64).decode()
+                    img_html = f"""
+                        <div style='text-align:center;'>
+                            <img src="data:image/png;base64,{img_base64}" width="200"/><br>
+                            <div style='font-family: Arial, sans-serif; font-size: 1.1em;'>
+                                <b>{row['Description']}</b><br>
+                                Unit: <b>{row['Unit']}</b>
+                            </div>
                         </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+                    """
+                    with col:
+                        st.markdown(img_html, unsafe_allow_html=True)
+                except Exception:
+                    with col:
+                        st.markdown(
+                            f"""
+                            <div style='text-align:center;'>
+                                <img src="{PLACEHOLDER_IMAGE}" width="200"/><br>
+                                <div style='font-family: Arial, sans-serif; font-size: 1.1em;'>
+                                    <b>{row['Description']}</b><br>
+                                    Unit: <b>{row['Unit']}</b>
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
 
     # --- Save Logic ---
