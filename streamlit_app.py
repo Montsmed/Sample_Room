@@ -189,21 +189,28 @@ if selected_layer:
     else:
         editor_initial = layer_data.copy()
 
-    persist_key = f"persisted_{selected_layer}"
-    editor_key = f"editor_{selected_layer}"
+   persist_key = f"persisted_{selected_layer}"
+editor_key = f"editor_{selected_layer}"
 
-    # Load data for editor: from session_state if exists, else from DataFrame or empty
-    if persist_key in st.session_state:
-        editor_value = st.session_state[persist_key]
+# Always ensure a DataFrame is used
+if persist_key in st.session_state:
+    editor_value = st.session_state[persist_key]
+    # If for some reason it's not a DataFrame, convert it
+    if not isinstance(editor_value, pd.DataFrame):
+        editor_value = pd.DataFrame(editor_value)
+else:
+    if layer_data.empty:
+        editor_value = pd.DataFrame(columns=data.columns)
     else:
-        editor_value = editor_initial
+        editor_value = layer_data.copy()
 
-    edited_data = st.data_editor(
-        editor_value,
-        num_rows="dynamic",
-        use_container_width=True,
-        key=editor_key
-    )
+edited_data = st.data_editor(
+    editor_value,
+    num_rows="dynamic",
+    use_container_width=True,
+    key=editor_key
+)
+
 
     # --- Gallery: Multiple images per row, fixed width 200px ---
     st.markdown("### Images in this shelf layer:")
