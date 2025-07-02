@@ -37,6 +37,31 @@ DARK_SHELF_COLORS = {
 DARK_FONT_COLOR = "#F3F3F3"
 LIGHT_GREY_DARK_MODE = '#D3D3D3'
 
+def ensure_dataframe(val, columns):
+    # Already a DataFrame
+    if isinstance(val, pd.DataFrame):
+        return val
+    # List of dicts (common from Streamlit widgets)
+    if isinstance(val, list):
+        if len(val) == 0:
+            return pd.DataFrame(columns=columns)
+        if all(isinstance(x, dict) for x in val):
+            return pd.DataFrame(val)
+        else:
+            return pd.DataFrame(columns=columns)
+    # Dict of columns (all values should be lists or Series of same length)
+    if isinstance(val, dict):
+        lengths = [len(v) for v in val.values() if hasattr(v, '__len__')]
+        if len(lengths) > 0 and len(set(lengths)) == 1:
+            try:
+                return pd.DataFrame(val)
+            except Exception:
+                return pd.DataFrame(columns=columns)
+        else:
+            return pd.DataFrame(columns=columns)
+    # Fallback: empty DataFrame
+    return pd.DataFrame(columns=columns)
+
 @st.cache_data
 def load_data(uploaded_file):
     in_mem_file = io.BytesIO(uploaded_file.read())
@@ -169,23 +194,8 @@ for layer_num in LAYER_ORDER:
                         persist_key = f"persisted_{prev_layer}"
                         editor_key = f"editor_{prev_layer}"
                         if editor_key in st.session_state:
-                            # Always ensure DataFrame
                             val = st.session_state[editor_key]
-                            if isinstance(val, pd.DataFrame):
-                                st.session_state[persist_key] = val
-                            elif isinstance(val, list):
-                                # If it's a list of dicts, convert
-                                if len(val) > 0 and isinstance(val[0], dict):
-                                    st.session_state[persist_key] = pd.DataFrame(val)
-                                else:
-                                    # Empty or invalid, create empty DataFrame with correct columns
-                                    st.session_state[persist_key] = pd.DataFrame(columns=data.columns)
-                            elif isinstance(val, dict):
-                                # If it's a dict of columns, convert
-                                st.session_state[persist_key] = pd.DataFrame(val)
-                            else:
-                                # Fallback: create empty DataFrame
-                                st.session_state[persist_key] = pd.DataFrame(columns=data.columns)
+                            st.session_state[persist_key] = ensure_dataframe(val, data.columns)
                     st.session_state["last_selected_layer"] = st.session_state["selected_layer"]
                     st.session_state["selected_layer"] = layer_label
                     st.rerun()
@@ -210,9 +220,7 @@ if selected_layer:
 
     # --- Robust DataFrame check for editor_value ---
     if persist_key in st.session_state:
-        editor_value = st.session_state[persist_key]
-        if not isinstance(editor_value, pd.DataFrame):
-            editor_value = pd.DataFrame(editor_value)
+        editor_value = ensure_dataframe(st.session_state[persist_key], data.columns)
     else:
         editor_value = editor_initial
 
@@ -275,7 +283,7 @@ if selected_layer:
 
     # --- Save Logic ---
     if st.button("Save Changes", key=f"save_{selected_layer}"):
-        st.session_state[persist_key] = edited_data
+        st.session_state[persist_key] = ensure_dataframe(edited_data, data.columns)
         data = data[data["Location"] != selected_layer]
         if not edited_data.empty:
             edited_data["Location"] = selected_layer
