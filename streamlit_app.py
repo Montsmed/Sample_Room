@@ -4,6 +4,7 @@ import io
 import requests
 from PIL import Image
 from io import BytesIO
+import base64
 
 # --- Shelf and Layer Definitions ---
 SHELVES = {
@@ -15,13 +16,25 @@ SHELVES = {
 }
 SHELF_ORDER = ["A", "B", "C", "D", "E"]
 LAYER_ORDER = [4, 3, 2, 1]  # Top to bottom
-SHELF_COLORS = {
+
+# Define two color schemes
+LIGHT_SHELF_COLORS = {
     "A": "#ADD8E6",  # light blue
     "B": "#90EE90",  # light green
     "C": "#FFFFE0",  # light yellow
     "D": "#F08080",  # light coral
     "E": "#EE82EE",  # violet
 }
+LIGHT_FONT_COLOR = "#222"
+
+DARK_SHELF_COLORS = {
+    "A": "#22577A",  # deep blue
+    "B": "#38A3A5",  # teal
+    "C": "#57CC99",  # green
+    "D": "#F3722C",  # orange
+    "E": "#C44536",  # red
+}
+DARK_FONT_COLOR = "#F3F3F3"
 
 @st.cache_data
 def load_data(uploaded_file):
@@ -82,14 +95,32 @@ if search_query:
 
 st.markdown("### Click a shelf layer to view/edit its items:")
 
+# --- Detect theme and set color scheme ---
+def get_color_scheme():
+    try:
+        theme_base = st.get_option("theme.base")
+    except Exception:
+        theme_base = "Light"
+    if theme_base and theme_base.lower() == "dark":
+        return DARK_SHELF_COLORS, DARK_FONT_COLOR
+    else:
+        return LIGHT_SHELF_COLORS, LIGHT_FONT_COLOR
+
+SHELF_COLORS, FONT_COLOR = get_color_scheme()
+
 # --- Interactive Shelf Grid with instant highlight ---
 if "selected_layer" not in st.session_state:
     st.session_state["selected_layer"] = None
 
 for layer_num in LAYER_ORDER:
     cols = st.columns(len(SHELF_ORDER) + 1)
+    # Centered and styled layer label
     cols[0].markdown(
-        f"<div style='height:60px;display:flex;align-items:center;font-weight:bold;'>Layer {layer_num}</div>",
+        f"""
+        <div style='height:60px;display:flex;align-items:center;justify-content:center;font-weight:bold;color:{FONT_COLOR};font-size:1.25em;text-align:center;background:transparent;'>
+            Layer {layer_num}
+        </div>
+        """,
         unsafe_allow_html=True
     )
     for idx, shelf in enumerate(SHELF_ORDER):
@@ -97,12 +128,20 @@ for layer_num in LAYER_ORDER:
             layer_label = f"{shelf}{layer_num}"
             color = SHELF_COLORS[shelf]
             highlight = (st.session_state["selected_layer"] == layer_label)
+            box_bg = "#FFD700" if highlight else color
+            box_font = "#222" if highlight else FONT_COLOR
             btn_style = f"""
-                height:60px;width:100px;font-size:1.5em;font-weight:bold;
-                background-color:{'#FFD700' if highlight else color};
-                border:3px solid {'#FFD700' if highlight else '#222'};
+                height:60px;width:100px;
+                font-size:1.5em;font-weight:bold;
+                background-color:{box_bg};
+                color:{box_font};
+                border:3px solid {'#FFD700' if highlight else '#444'};
                 border-radius:10px;
                 margin:4px 0 4px 0;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                text-align:center;
             """
             with cols[idx + 1]:
                 st.markdown(
@@ -161,16 +200,13 @@ if selected_layer:
                     new_width = 200
                     new_height = int(h * (new_width / w))
                     img_resized = img.resize((new_width, new_height))
-                    # Save to buffer for HTML embedding
                     buf = BytesIO()
                     img_resized.save(buf, format="PNG")
-                    img_base64 = buf.getvalue()
-                    import base64
-                    img_base64 = base64.b64encode(img_base64).decode()
+                    img_base64 = base64.b64encode(buf.getvalue()).decode()
                     img_html = f"""
                         <div style='text-align:center;'>
-                            <img src="data:image/png;base64,{img_base64}" width="200"/><br>
-                            <div style='font-family: Arial, sans-serif; font-size: 1.1em;'>
+                            <img src='data:image/png;base64,{img_base64}' width='200'/><br>
+                            <div style='font-family: Arial, sans-serif; font-size: 1.1em; color:{FONT_COLOR};'>
                                 <b>{row['Description']}</b><br>
                                 Unit: <b>{row['Unit']}</b>
                             </div>
@@ -183,8 +219,8 @@ if selected_layer:
                         st.markdown(
                             f"""
                             <div style='text-align:center;'>
-                                <img src="{PLACEHOLDER_IMAGE}" width="200"/><br>
-                                <div style='font-family: Arial, sans-serif; font-size: 1.1em;'>
+                                <img src='{PLACEHOLDER_IMAGE}' width='200'/><br>
+                                <div style='font-family: Arial, sans-serif; font-size: 1.1em; color:{FONT_COLOR};'>
                                     <b>{row['Description']}</b><br>
                                     Unit: <b>{row['Unit']}</b>
                                 </div>
@@ -192,7 +228,6 @@ if selected_layer:
                             """,
                             unsafe_allow_html=True
                         )
-
 
     # --- Save Logic ---
     if st.button("Save Changes", key=f"save_{selected_layer}"):
