@@ -169,7 +169,11 @@ for layer_num in LAYER_ORDER:
                         persist_key = f"persisted_{prev_layer}"
                         editor_key = f"editor_{prev_layer}"
                         if editor_key in st.session_state:
-                            st.session_state[persist_key] = st.session_state[editor_key]
+                            # Always ensure DataFrame
+                            val = st.session_state[editor_key]
+                            if not isinstance(val, pd.DataFrame):
+                                val = pd.DataFrame(val)
+                            st.session_state[persist_key] = val
                     st.session_state["last_selected_layer"] = st.session_state["selected_layer"]
                     st.session_state["selected_layer"] = layer_label
                     st.rerun()
@@ -188,28 +192,24 @@ if selected_layer:
         editor_initial = pd.DataFrame(columns=data.columns)
     else:
         editor_initial = layer_data.copy()
+
     persist_key = f"persisted_{selected_layer}"
     editor_key = f"editor_{selected_layer}"
 
-# Always ensure a DataFrame is used
-if persist_key in st.session_state:
-    editor_value = st.session_state[persist_key]
-    # If for some reason it's not a DataFrame, convert it
-    if not isinstance(editor_value, pd.DataFrame):
-        editor_value = pd.DataFrame(editor_value)
-else:
-    if layer_data.empty:
-        editor_value = pd.DataFrame(columns=data.columns)
+    # --- Robust DataFrame check for editor_value ---
+    if persist_key in st.session_state:
+        editor_value = st.session_state[persist_key]
+        if not isinstance(editor_value, pd.DataFrame):
+            editor_value = pd.DataFrame(editor_value)
     else:
-        editor_value = layer_data.copy()
+        editor_value = editor_initial
 
-edited_data = st.data_editor(
-    editor_value,
-    num_rows="dynamic",
-    use_container_width=True,
-    key=editor_key
-)
-
+    edited_data = st.data_editor(
+        editor_value,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=editor_key
+    )
 
     # --- Gallery: Multiple images per row, fixed width 200px ---
     st.markdown("### Images in this shelf layer:")
