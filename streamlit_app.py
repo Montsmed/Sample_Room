@@ -23,7 +23,6 @@ SHELF_COLORS = {
     "E": "#EE82EE",  # violet
 }
 
-# --- Load Data ---
 @st.cache_data
 def load_data(uploaded_file):
     in_mem_file = io.BytesIO(uploaded_file.read())
@@ -35,7 +34,7 @@ def load_data(uploaded_file):
 st.set_page_config(page_title="Inventory Visual Manager", layout="wide")
 st.title("📦 Visual Inventory Management System")
 
-# --- Robust Image Loading for the Shelf Overview Image ---
+# --- Shelf overview image ---
 def load_shelf_image():
     image_path = "Sampleroom.png"
     image_url = "https://github.com/Montsmed/Sample_Room/raw/main/Sampleroom.png"
@@ -47,7 +46,7 @@ def load_shelf_image():
         try:
             img = Image.open(requests.get(image_url, stream=True).raw)
             w, h = img.size
-            return img.resize((w // 4, h // 4))
+            return img.resize((w // 2, h // 2))
         except:
             return None
 
@@ -65,7 +64,7 @@ if not uploaded_file:
 uploaded_file.seek(0)
 data = load_data(uploaded_file)
 
-# --- Enhanced Search (B, D, E, Model) ---
+# --- Search ---
 search_query = st.text_input("🔎 Search items by Description, Unit, Model, or SN/Lot (partial match):")
 
 if search_query:
@@ -86,8 +85,6 @@ st.markdown("### Click a shelf layer to view/edit its items:")
 # --- Interactive Shelf Grid with instant highlight ---
 if "selected_layer" not in st.session_state:
     st.session_state["selected_layer"] = None
-if "selected_row" not in st.session_state:
-    st.session_state["selected_row"] = None
 
 for layer_num in LAYER_ORDER:
     cols = st.columns(len(SHELF_ORDER) + 1)
@@ -114,7 +111,6 @@ for layer_num in LAYER_ORDER:
                 )
                 if st.button(f"Select {layer_label}", key=f"btn_{layer_label}"):
                     st.session_state["selected_layer"] = layer_label
-                    st.session_state["selected_row"] = None  # Reset row selection
                     st.rerun()
         else:
             cols[idx + 1].markdown("")
@@ -136,7 +132,7 @@ if selected_layer:
             key=f"editor_{selected_layer}"
         )
     else:
-        # Show the data editor first (hide Image_URL in editor)
+        # Data editor first (hide Image_URL in editor)
         edited_data = st.data_editor(
             layer_data.drop(columns=["Image_URL"]),
             num_rows="dynamic",
@@ -146,7 +142,7 @@ if selected_layer:
 
         # --- Gallery: Multiple images per row, fixed width 200px ---
         st.markdown("### Images in this shelf layer:")
-        images_per_row = 5  # You can change this for more/less per row
+        images_per_row = 5  # Number of images per row
         img_rows = [
             layer_data.iloc[i:i+images_per_row]
             for i in range(0, len(layer_data), images_per_row)
@@ -168,49 +164,27 @@ if selected_layer:
                     except Exception:
                         with col:
                             st.info("Image could not be loaded.")
-                # Optionally, show info for missing images
-                # else:
-                #     with col:
-                #         st.info("No image.")
-        # Show image for selected row
-        if st.session_state.get("selected_row") is not None:
-            row = layer_data.iloc[st.session_state["selected_row"]]
-            image_url = str(row["Image_URL"]).strip()
-            if image_url and image_url.lower() != "nan":
-                try:
-                    response = requests.get(image_url)
-                    img = Image.open(BytesIO(response.content))
-                    w, h = img.size
-                    new_width = 400
-                    new_height = int(h * (new_width / w))
-                    img_resized = img.resize((new_width, new_height))
-                    st.image(img_resized, caption=f"Image for {row['Description']}", use_container_width=False)
-                except Exception:
-                    st.info("Image could not be loaded.")
-            else:
-                st.info("No image available for this item.")
 
-     # --- Save Logic ---
-        if st.button("Save Changes"):
-            if layer_data.empty and not edited_data.empty:
-                edited_data["Location"] = selected_layer
-                data = pd.concat([data, edited_data], ignore_index=True)
-                st.success(f"Added {len(edited_data)} new items to {selected_layer}!")
-            else:
-                data.update(edited_data)
-                st.success("Changes saved!")
-            
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                data.to_excel(writer, index=False)
-            output.seek(0)
-            
-            st.download_button(
-                label="Download Updated Excel File",
-                data=output,
-                file_name="updated_inventory.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    # --- Save Logic ---
+    if st.button("Save Changes"):
+        if layer_data.empty and not edited_data.empty:
+            edited_data["Location"] = selected_layer
+            data = pd.concat([data, edited_data], ignore_index=True)
+            st.success(f"Added {len(edited_data)} new items to {selected_layer}!")
         else:
-            st.info("Click a shelf layer above to view its items.")
-
+            data.update(edited_data)
+            st.success("Changes saved!")
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            data.to_excel(writer, index=False)
+        output.seek(0)
+        
+        st.download_button(
+            label="Download Updated Excel File",
+            data=output,
+            file_name="updated_inventory.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+else:
+    st.info("Click a shelf layer above to view its items.")
