@@ -190,7 +190,7 @@ for layer_num in LAYER_ORDER:
                         st.session_state["temp_edits"][prev_layer] = ensure_dataframe(val, data.columns)
                     st.session_state["last_selected_layer"] = st.session_state["selected_layer"]
                     st.session_state["selected_layer"] = layer_label
-                    st.experimental_rerun()
+                    st.rerun()
         else:
             cols[idx + 1].markdown("")
 
