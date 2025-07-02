@@ -35,6 +35,7 @@ DARK_SHELF_COLORS = {
     "E": "#C44536",  # red
 }
 DARK_FONT_COLOR = "#F3F3F3"
+LIGHT_GREY_DARK_MODE = '#D3D3D3'
 
 @st.cache_data
 def load_data(uploaded_file):
@@ -106,7 +107,18 @@ def get_color_scheme():
     else:
         return LIGHT_SHELF_COLORS, LIGHT_FONT_COLOR
 
+def get_layer_label_color():
+    try:
+        theme_base = st.get_option("theme.base")
+    except Exception:
+        theme_base = "Light"
+    if theme_base and theme_base.lower() == "dark":
+        return LIGHT_GREY_DARK_MODE
+    else:
+        return "#222"
+
 SHELF_COLORS, FONT_COLOR = get_color_scheme()
+LAYER_LABEL_COLOR = get_layer_label_color()
 
 # --- Interactive Shelf Grid with instant highlight ---
 if "selected_layer" not in st.session_state:
@@ -114,23 +126,11 @@ if "selected_layer" not in st.session_state:
 
 for layer_num in LAYER_ORDER:
     cols = st.columns(len(SHELF_ORDER) + 1)
-    # Centered and styled layer label, font color matches theme
+    # Centered and styled layer label
     with cols[0]:
         st.markdown(
             f"""
-            <div style='
-                height:60px;
-                width:100%;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                font-weight:bold;
-                color:{FONT_COLOR};
-                font-size:1.25em;
-                text-align:center;
-                background:transparent;
-                border-radius:10px;
-            '>
+            <div style='height:60px;width:100%;display:flex;align-items:center;justify-content:center;font-weight:bold;color:{LAYER_LABEL_COLOR};font-size:1.25em;text-align:center;background:transparent;border-radius:10px;'>
                 Layer {layer_num}
             </div>
             """,
