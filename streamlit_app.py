@@ -373,5 +373,5 @@ else:
             file_name="updated_inventory.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-else:
-    st.info("Click a shelf layer above to view its items.")
+    else:
+        st.info("Click a shelf layer above to view its items.")
