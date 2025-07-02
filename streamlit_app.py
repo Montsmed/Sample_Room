@@ -144,52 +144,34 @@ if selected_layer:
             key=f"editor_{selected_layer}"
         )
 
-        # Show all images in the layer as a gallery below the editor
+        # --- Gallery: Multiple images per row, fixed width 200px ---
         st.markdown("### Images in this shelf layer:")
-        for idx, row in layer_data.iterrows():
-            image_url = str(row["Image_URL"]).strip()
-            if image_url and image_url.lower() != "nan":
-                try:
-                    response = requests.get(image_url)
-                    img = Image.open(BytesIO(response.content))
-                    w, h = img.size
-                    max_dim = 1600
-                    scale = min(max_dim / w, max_dim / h, 1)
-                    new_width = int(w * scale)
-                    new_height = int(h * scale)
-                    img_resized = img.resize((new_width, new_height))
-                    st.image(img_resized, caption=f"{row['Description']}", use_container_width=False)
-                except Exception:
-                    st.info(f"Image for {row['Description']} could not be loaded.")
-            # Optionally, show info for missing images:
-            # else:
-            #     st.info(f"No image available for {row['Description']}.")
-
-    # --- Save Logic ---
-    if st.button("Save Changes"):
-        if layer_data.empty and not edited_data.empty:
-            edited_data["Location"] = selected_layer
-            data = pd.concat([data, edited_data], ignore_index=True)
-            st.success(f"Added {len(edited_data)} new items to {selected_layer}!")
-        else:
-            data.update(edited_data)
-            st.success("Changes saved!")
-        
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            data.to_excel(writer, index=False)
-        output.seek(0)
-        
-        st.download_button(
-            label="Download Updated Excel File",
-            data=output,
-            file_name="updated_inventory.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    else:
-        st.info("Click a shelf layer above to view its items.")
-
-
+        images_per_row = 5  # You can change this for more/less per row
+        img_rows = [
+            layer_data.iloc[i:i+images_per_row]
+            for i in range(0, len(layer_data), images_per_row)
+        ]
+        for img_row in img_rows:
+            cols = st.columns(len(img_row))
+            for col, (_, row) in zip(cols, img_row.iterrows()):
+                image_url = str(row["Image_URL"]).strip()
+                if image_url and image_url.lower() != "nan":
+                    try:
+                        response = requests.get(image_url)
+                        img = Image.open(BytesIO(response.content))
+                        w, h = img.size
+                        new_width = 200
+                        new_height = int(h * (new_width / w))
+                        img_resized = img.resize((new_width, new_height))
+                        with col:
+                            st.image(img_resized, caption=row["Description"], use_container_width=False)
+                    except Exception:
+                        with col:
+                            st.info("Image could not be loaded.")
+                # Optionally, show info for missing images
+                # else:
+                #     with col:
+                #         st.info("No image.")
         # Show image for selected row
         if st.session_state.get("selected_row") is not None:
             row = layer_data.iloc[st.session_state["selected_row"]]
@@ -208,27 +190,27 @@ if selected_layer:
             else:
                 st.info("No image available for this item.")
 
-    # --- Save Logic ---
-    if st.button("Save Changes"):
-        if layer_data.empty and not edited_data.empty:
-            edited_data["Location"] = selected_layer
-            data = pd.concat([data, edited_data], ignore_index=True)
-            st.success(f"Added {len(edited_data)} new items to {selected_layer}!")
-        else:
-            data.update(edited_data)
-            st.success("Changes saved!")
-        
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            data.to_excel(writer, index=False)
-        output.seek(0)
-        
-        st.download_button(
-            label="Download Updated Excel File",
-            data=output,
-            file_name="updated_inventory.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-else:
-    st.info("Click a shelf layer above to view its items.")
+     # --- Save Logic ---
+        if st.button("Save Changes"):
+            if layer_data.empty and not edited_data.empty:
+                edited_data["Location"] = selected_layer
+                data = pd.concat([data, edited_data], ignore_index=True)
+                st.success(f"Added {len(edited_data)} new items to {selected_layer}!")
+            else:
+                data.update(edited_data)
+                st.success("Changes saved!")
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                data.to_excel(writer, index=False)
+            output.seek(0)
+            
+            st.download_button(
+                label="Download Updated Excel File",
+                data=output,
+                file_name="updated_inventory.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    else:
+        st.info("Click a shelf layer above to view its items.")
 
