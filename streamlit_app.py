@@ -120,7 +120,7 @@ def get_layer_label_color():
 SHELF_COLORS, FONT_COLOR = get_color_scheme()
 LAYER_LABEL_COLOR = get_layer_label_color()
 
-# --- Shelf Grid with Edit Persistence on Navigation ---
+# --- Interactive Shelf Grid with instant highlight and edit persistence ---
 if "selected_layer" not in st.session_state:
     st.session_state["selected_layer"] = None
 if "last_selected_layer" not in st.session_state:
@@ -163,14 +163,13 @@ for layer_num in LAYER_ORDER:
                     unsafe_allow_html=True
                 )
                 if st.button(f"Select {layer_label}", key=f"btn_{layer_label}"):
-                    # --- Save current edits before switching ---
+                    # Save current edits before switching
                     if st.session_state["selected_layer"]:
                         prev_layer = st.session_state["selected_layer"]
                         persist_key = f"persisted_{prev_layer}"
                         editor_key = f"editor_{prev_layer}"
                         if editor_key in st.session_state:
                             st.session_state[persist_key] = st.session_state[editor_key]
-                    # --- Switch to new shelf ---
                     st.session_state["last_selected_layer"] = st.session_state["selected_layer"]
                     st.session_state["selected_layer"] = layer_label
                     st.rerun()
@@ -190,7 +189,6 @@ if selected_layer:
     else:
         editor_initial = layer_data.copy()
 
-    # Unique editor key for persistence (not the widget key!)
     persist_key = f"persisted_{selected_layer}"
     editor_key = f"editor_{selected_layer}"
 
@@ -200,7 +198,6 @@ if selected_layer:
     else:
         editor_value = editor_initial
 
-    # Show editor (Streamlit manages st.session_state[editor_key])
     edited_data = st.data_editor(
         editor_value,
         num_rows="dynamic",
@@ -210,7 +207,7 @@ if selected_layer:
 
     # --- Gallery: Multiple images per row, fixed width 200px ---
     st.markdown("### Images in this shelf layer:")
-    images_per_row = 5  # Number of images per row
+    images_per_row = 5
     PLACEHOLDER_IMAGE = "https://github.com/Montsmed/Sample_Room/raw/main/No_Image.jpg"
     img_rows = [
         edited_data.iloc[i:i+images_per_row]
@@ -260,13 +257,8 @@ if selected_layer:
 
     # --- Save Logic ---
     if st.button("Save Changes", key=f"save_{selected_layer}"):
-        # Persist the edits for this shelf/layer
         st.session_state[persist_key] = edited_data
-
-        # Update the main DataFrame
-        # Remove old entries for this shelf
         data = data[data["Location"] != selected_layer]
-        # Append new entries
         if not edited_data.empty:
             edited_data["Location"] = selected_layer
             data = pd.concat([data, edited_data], ignore_index=True)
@@ -274,7 +266,6 @@ if selected_layer:
         else:
             st.success("No items to save for this shelf.")
 
-        # Download updated Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             data.to_excel(writer, index=False)
@@ -287,91 +278,3 @@ if selected_layer:
         )
 else:
     st.info("Click a shelf layer above to view its items.")
-
-    # Show editor (Streamlit manages st.session_state[editor_key])
-    edited_data = st.data_editor(
-        editor_value,
-        num_rows="dynamic",
-        use_container_width=True,
-        key=editor_key
-    )
-
-    # --- Gallery: Multiple images per row, fixed width 200px ---
-    st.markdown("### Images in this shelf layer:")
-    images_per_row = 5  # Number of images per row
-    PLACEHOLDER_IMAGE = "https://github.com/Montsmed/Sample_Room/raw/main/No_Image.jpg"
-    img_rows = [
-        edited_data.iloc[i:i+images_per_row]
-        for i in range(0, len(edited_data), images_per_row)
-    ]
-    for img_row in img_rows:
-        cols = st.columns(len(img_row))
-        for col, (_, row) in zip(cols, img_row.iterrows()):
-            image_url = str(row["Image_URL"]).strip()
-            if not image_url or image_url.lower() == "nan":
-                image_url = PLACEHOLDER_IMAGE
-            try:
-                response = requests.get(image_url)
-                img = Image.open(BytesIO(response.content))
-                w, h = img.size
-                new_width = 200
-                new_height = int(h * (new_width / w))
-                img_resized = img.resize((new_width, new_height))
-                buf = BytesIO()
-                img_resized.save(buf, format="PNG")
-                img_base64 = base64.b64encode(buf.getvalue()).decode()
-                img_html = f"""
-                    <div style='text-align:center;'>
-                        <img src='data:image/png;base64,{img_base64}' width='200'/><br>
-                        <div style='font-family: Arial, sans-serif; font-size: 1.1em; color:{FONT_COLOR};'>
-                            <b>{row['Description']}</b><br>
-                            Unit: <b>{row['Unit']}</b>
-                        </div>
-                    </div>
-                """
-                with col:
-                    st.markdown(img_html, unsafe_allow_html=True)
-            except Exception:
-                with col:
-                    st.markdown(
-                        f"""
-                        <div style='text-align:center;'>
-                            <img src='{PLACEHOLDER_IMAGE}' width='200'/><br>
-                            <div style='font-family: Arial, sans-serif; font-size: 1.1em; color:{FONT_COLOR};'>
-                                <b>{row['Description']}</b><br>
-                                Unit: <b>{row['Unit']}</b>
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-    # --- Save Logic ---
-    if st.button("Save Changes", key=f"save_{selected_layer}"):
-        # Persist the edits for this shelf/layer
-        st.session_state[persist_key] = edited_data
-
-        # Update the main DataFrame
-        # Remove old entries for this shelf
-        data = data[data["Location"] != selected_layer]
-        # Append new entries
-        if not edited_data.empty:
-            edited_data["Location"] = selected_layer
-            data = pd.concat([data, edited_data], ignore_index=True)
-            st.success(f"Saved {len(edited_data)} items for {selected_layer}!")
-        else:
-            st.success("No items to save for this shelf.")
-
-        # Download updated Excel
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            data.to_excel(writer, index=False)
-        output.seek(0)
-        st.download_button(
-            label="Download Updated Excel File",
-            data=output,
-            file_name="updated_inventory.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    else:
-        st.info("Click a shelf layer above to view its items.")
