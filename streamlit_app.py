@@ -115,14 +115,27 @@ if "selected_layer" not in st.session_state:
 for layer_num in LAYER_ORDER:
     cols = st.columns(len(SHELF_ORDER) + 1)
     # Centered and styled layer label
-    cols[0].markdown(
-        f"""
-        <div style='height:60px;display:flex;align-items:center;justify-content:center;font-weight:bold;color:{FONT_COLOR};font-size:1.25em;text-align:center;background:transparent;'>
-            Layer {layer_num}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    with cols[0]:
+        st.markdown(
+            f"""
+            <div style='
+                height:60px;
+                width:100%;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                font-weight:bold;
+                color:{FONT_COLOR};
+                font-size:1.25em;
+                text-align:center;
+                background:transparent;
+                border-radius:10px;
+            '>
+                Layer {layer_num}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     for idx, shelf in enumerate(SHELF_ORDER):
         if layer_num in SHELVES[shelf]:
             layer_label = f"{shelf}{layer_num}"
@@ -132,15 +145,15 @@ for layer_num in LAYER_ORDER:
             box_font = "#222" if highlight else FONT_COLOR
             btn_style = f"""
                 height:60px;width:100px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
                 font-size:1.5em;font-weight:bold;
                 background-color:{box_bg};
                 color:{box_font};
                 border:3px solid {'#FFD700' if highlight else '#444'};
                 border-radius:10px;
                 margin:4px 0 4px 0;
-                display:flex;
-                align-items:center;
-                justify-content:center;
                 text-align:center;
             """
             with cols[idx + 1]:
