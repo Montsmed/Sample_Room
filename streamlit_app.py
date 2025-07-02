@@ -166,16 +166,16 @@ if selected_layer:
             
         # Show image for selected row
         if st.session_state["selected_row"] is not None:
-    row = layer_data.iloc[st.session_state["selected_row"]]
-    image_url = str(row["Image_URL"]).strip()
-    st.write("Debug: Image_URL value is", image_url)  # For debugging
-    if image_url and image_url.lower() != "nan":
-        try:
-            st.image(image_url, caption=f"Image for {row['Description']}")
-        except Exception as e:
-            st.error(f"Could not load image: {e}")
-    else:
-        st.info("No image available for this item.")
+            row = layer_data.iloc[st.session_state["selected_row"]]
+            image_url = str(row["Image_URL"]).strip()
+            st.write("Debug: Image_URL value is", image_url)  # For debugging
+            if image_url and image_url.lower() != "nan":
+                try:
+                    st.image(image_url, caption=f"Image for {row['Description']}")
+            except Exception as e:
+                st.error(f"Could not load image: {e}")
+        else:
+            st.info("No image available for this item.")
         
         # Data editor for editing
         edited_data = st.data_editor(
