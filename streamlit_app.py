@@ -119,8 +119,8 @@ selected_layer = st.session_state["selected_layer"]
 
 # --- Show and Edit Items in Selected Layer ---
 if selected_layer:
-    st.markdown(f"## Items in **{selected_layer}**")
     layer_data = data[data["Location"] == selected_layer].reset_index(drop=True)
+    st.markdown(f"## Items in **{selected_layer}**")
     
     if layer_data.empty:
         st.info("No items in this layer. Add new items below:")
@@ -132,60 +132,59 @@ if selected_layer:
             key=f"editor_{selected_layer}"
         )
     else:
-        # Data editor includes Image_URL column for editing
+        # Data editor first (include Image_URL column)
         edited_data = st.data_editor(
-            layer_data,  # include all columns including Image_URL
+            layer_data,
             num_rows="dynamic",
             use_container_width=True,
             key=f"editor_{selected_layer}"
         )
 
-PLACEHOLDER_IMAGE = "https://github.com/Montsmed/Sample_Room/raw/main/No_Image.jpg"
+        # --- Gallery: Multiple images per row, fixed width 200px ---
+        st.markdown("### Images in this shelf layer:")
+        images_per_row = 5  # Number of images per row
+        img_rows = [
+            layer_data.iloc[i:i+images_per_row]
+            for i in range(0, len(layer_data), images_per_row)
+        ]
+        PLACEHOLDER_IMAGE = "https://github.com/Montsmed/Sample_Room/raw/main/No_Image.jpg"
+        for img_row in img_rows:
+            cols = st.columns(len(img_row))
+            for col, (_, row) in zip(cols, img_row.iterrows()):
+                image_url = str(row["Image_URL"]).strip()
+                if not image_url or image_url.lower() == "nan":
+                    image_url = PLACEHOLDER_IMAGE
+                try:
+                    response = requests.get(image_url)
+                    img = Image.open(BytesIO(response.content))
+                    w, h = img.size
+                    new_width = 200
+                    new_height = int(h * (new_width / w))
+                    img_resized = img.resize((new_width, new_height))
+                    with col:
+                        st.image(img_resized, use_container_width=False)
+                        st.markdown(
+                            f"""
+                            <div style='text-align:center; font-family: Arial, sans-serif; font-size: 1.1em;'>
+                                <b>{row['Description']}</b><br>
+                                Unit: <b>{row['Unit']}</b>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                except Exception:
+                    with col:
+                        st.image(PLACEHOLDER_IMAGE, use_container_width=False)
+                        st.markdown(
+                            f"""
+                            <div style='text-align:center; font-family: Arial, sans-serif; font-size: 1.1em;'>
+                                <b>{row['Description']}</b><br>
+                                Unit: <b>{row['Unit']}</b>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
-st.markdown("### Images in this shelf layer:")
-images_per_row = 5  # Number of images per row
-img_rows = [
-    layer_data.iloc[i:i+images_per_row]
-    for i in range(0, len(layer_data), images_per_row)
-]
-for img_row in img_rows:
-    cols = st.columns(len(img_row))
-    for col, (_, row) in zip(cols, img_row.iterrows()):
-        image_url = str(row["Image_URL"]).strip()
-        if not image_url or image_url.lower() == "nan":
-            image_url = PLACEHOLDER_IMAGE
-        try:
-            response = requests.get(image_url)
-            img = Image.open(BytesIO(response.content))
-            w, h = img.size
-            new_width = 200
-            new_height = int(h * (new_width / w))
-            img_resized = img.resize((new_width, new_height))
-            with col:
-                st.image(img_resized, use_container_width=False)
-                st.markdown(
-                    f"""
-                    <div style='text-align:center; font-family: Arial, sans-serif; font-size: 1.1em;'>
-                        <b>{row['Description']}</b><br>
-                        Unit: <b>{row['Unit']}</b>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-        except Exception:
-            with col:
-                st.image(PLACEHOLDER_IMAGE, use_container_width=False)
-                st.markdown(
-                    f"""
-                    <div style='text-align:center; font-family: Arial, sans-serif; font-size: 1.1em;'>
-                        <b>{row['Description']}</b><br>
-                        Unit: <b>{row['Unit']}</b>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-
-                
     # --- Save Logic ---
     if st.button("Save Changes", key=f"save_{selected_layer}"):
         if layer_data.empty and not edited_data.empty:
