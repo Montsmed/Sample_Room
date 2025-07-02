@@ -114,7 +114,7 @@ if "selected_layer" not in st.session_state:
 
 for layer_num in LAYER_ORDER:
     cols = st.columns(len(SHELF_ORDER) + 1)
-    # Centered and styled layer label
+    # Centered and styled layer label, font color matches theme
     with cols[0]:
         st.markdown(
             f"""
