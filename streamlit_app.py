@@ -139,9 +139,6 @@ if search_query:
 
 st.markdown("### Click a shelf layer to view/edit its items:")
 
-# --- Temp memory for unsaved edits ---
-if "temp_edits" not in st.session_state:
-    st.session_state["temp_edits"] = {}
 if "selected_layer" not in st.session_state:
     st.session_state["selected_layer"] = None
 if "last_selected_layer" not in st.session_state:
@@ -184,10 +181,6 @@ for layer_num in LAYER_ORDER:
                     unsafe_allow_html=True
                 )
                 if st.button(f"Select {layer_label}", key=f"btn_{layer_label}"):
-                    prev_layer = st.session_state["selected_layer"]
-                    if prev_layer and f"editor_{prev_layer}" in st.session_state:
-                        val = st.session_state[f"editor_{prev_layer}"]
-                        st.session_state["temp_edits"][prev_layer] = ensure_dataframe(val, data.columns)
                     st.session_state["last_selected_layer"] = st.session_state["selected_layer"]
                     st.session_state["selected_layer"] = layer_label
                     st.rerun()
@@ -200,28 +193,27 @@ if selected_layer:
     layer_data = data[data["Location"] == selected_layer].reset_index(drop=True)
     st.markdown(f"## Items in **{selected_layer}**")
     editor_key = f"editor_{selected_layer}"
-
-    # --- Load from temp memory if exists, else from DataFrame ---
     layer_key = f"temp_edits_{selected_layer}"
+
+    # --- Only initialize temp memory for this layer if not present ---
     if layer_key not in st.session_state:
         if not layer_data.empty:
             st.session_state[layer_key] = layer_data.copy()
         else:
             st.session_state[layer_key] = pd.DataFrame(columns=data.columns)
+
+    # --- Use session state as single source of truth for editor ---
     editor_value = st.session_state[layer_key]
 
-
     edited_data = st.data_editor(
-    editor_value,
-    num_rows="dynamic",
-    use_container_width=True,
-    key=editor_key
+        editor_value,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=editor_key
     )
-    
-# Always update session state with the latest edits
-st.session_state[layer_key] = ensure_dataframe(edited_data, data.columns)
 
-    st.session_state["temp_edits"][selected_layer] = ensure_dataframe(edited_data, data.columns)
+    # --- Always update temp memory with latest edits ---
+    st.session_state[layer_key] = ensure_dataframe(edited_data, data.columns)
 
     # --- Gallery: Multiple images per row, fixed width 200px ---
     st.markdown("### Images in this shelf layer:")
@@ -274,27 +266,27 @@ st.session_state[layer_key] = ensure_dataframe(edited_data, data.columns)
                     )
 
     if st.button("Save Changes", key=f"save_{selected_layer}"):
-    # Save edits back to main data
-    data = data[data["Location"] != selected_layer]
-    if not edited_data.empty:
-        edited_data["Location"] = selected_layer
-        data = pd.concat([data, edited_data], ignore_index=True)
-        st.success(f"Saved {len(edited_data)} items for {selected_layer}!")
-    else:
-        st.success("No items to save for this shelf.")
+        # Save edits to main data
+        data = data[data["Location"] != selected_layer]
+        if not edited_data.empty:
+            edited_data["Location"] = selected_layer
+            data = pd.concat([data, edited_data], ignore_index=True)
+            st.success(f"Saved {len(edited_data)} items for {selected_layer}!")
+        else:
+            st.success("No items to save for this shelf.")
 
-    # Reset temp memory for this layer
-    st.session_state[layer_key] = edited_data.copy()
+        # Reset temp memory for this layer to the saved data
+        st.session_state[layer_key] = edited_data.copy()
 
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        data.to_excel(writer, index=False)
-    output.seek(0)
-    st.download_button(
-        label="Download Updated Excel File",
-        data=output,
-        file_name="updated_inventory.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    else:
-        st.info("Click a shelf layer above to view its items.")
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            data.to_excel(writer, index=False)
+        output.seek(0)
+        st.download_button(
+            label="Download Updated Excel File",
+            data=output,
+            file_name="updated_inventory.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+else:
+    st.info("Click a shelf layer above to view its items.")
