@@ -146,7 +146,15 @@ if selected_layer:
         if row_idx is not None:
             st.session_state["selected_row"] = row_idx
 
-        # Show image for selected row
+        # Always show the data editor first (hide Image_URL in editor)
+        edited_data = st.data_editor(
+            layer_data.drop(columns=["Image_URL"]),
+            num_rows="dynamic",
+            use_container_width=True,
+            key=f"editor_{selected_layer}"
+        )
+
+        # Then show the image below the editor
         if st.session_state["selected_row"] is not None:
             row = layer_data.iloc[st.session_state["selected_row"]]
             image_url = str(row["Image_URL"]).strip()
@@ -155,20 +163,14 @@ if selected_layer:
                     response = requests.get(image_url)
                     img = Image.open(BytesIO(response.content))
                     w, h = img.size
-                    img_resized = img.resize((w // 2, h // 2))
+                    new_width = 400
+                    new_height = int(h * (new_width / w))
+                    img_resized = img.resize((new_width, new_height))
                     st.image(img_resized, caption=f"Image for {row['Description']}", use_container_width=False)
                 except Exception:
                     st.info("Image could not be loaded.")
             else:
                 st.info("No image available for this item.")
-
-        # Data editor for editing (hide Image_URL in editor)
-        edited_data = st.data_editor(
-            layer_data.drop(columns=["Image_URL"]),
-            num_rows="dynamic",
-            use_container_width=True,
-            key=f"editor_{selected_layer}"
-        )
 
     # --- Save Logic ---
     if st.button("Save Changes"):
@@ -193,3 +195,4 @@ if selected_layer:
         )
 else:
     st.info("Click a shelf layer above to view its items.")
+
