@@ -171,9 +171,21 @@ for layer_num in LAYER_ORDER:
                         if editor_key in st.session_state:
                             # Always ensure DataFrame
                             val = st.session_state[editor_key]
-                            if not isinstance(val, pd.DataFrame):
-                                val = pd.DataFrame(val)
-                            st.session_state[persist_key] = val
+                                if isinstance(val, pd.DataFrame):
+                                    st.session_state[persist_key] = val
+                                elif isinstance(val, list):
+                                    # If it's a list of dicts, convert
+                                    if len(val) > 0 and isinstance(val[0], dict):
+                                        st.session_state[persist_key] = pd.DataFrame(val)
+                                    else:
+                                        # Empty or invalid, create empty DataFrame with correct columns
+                                        st.session_state[persist_key] = pd.DataFrame(columns=data.columns)
+                                elif isinstance(val, dict):
+                                    # If it's a dict of columns, convert
+                                    st.session_state[persist_key] = pd.DataFrame(val)
+                                else:
+                                    # Fallback: create empty DataFrame
+                                    st.session_state[persist_key] = pd.DataFrame(columns=data.columns)
                     st.session_state["last_selected_layer"] = st.session_state["selected_layer"]
                     st.session_state["selected_layer"] = layer_label
                     st.rerun()
