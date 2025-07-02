@@ -188,9 +188,8 @@ if selected_layer:
         editor_initial = pd.DataFrame(columns=data.columns)
     else:
         editor_initial = layer_data.copy()
-
-   persist_key = f"persisted_{selected_layer}"
-editor_key = f"editor_{selected_layer}"
+    persist_key = f"persisted_{selected_layer}"
+    editor_key = f"editor_{selected_layer}"
 
 # Always ensure a DataFrame is used
 if persist_key in st.session_state:
