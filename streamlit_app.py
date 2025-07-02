@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import io
+import requests
 from PIL import Image
+from urllib.request import urlopen
 
 # --- Shelf and Layer Definitions ---
 SHELVES = {
@@ -33,14 +35,32 @@ def load_data(uploaded_file):
 st.set_page_config(page_title="Inventory Visual Manager", layout="wide")
 st.title("📦 Visual Inventory Management System")
 
-# --- Load and display Sampleroom.png at half size ---
-try:
-    img = Image.open("Sampleroom.png")
-    w, h = img.size
-    img_resized = img.resize((w // 2, h // 2))
+# --- Robust Image Loading from Local or GitHub ---
+def load_shelf_image():
+    image_path = "Sampleroom.png"
+    image_url = "https://github.com/HowardChu/PyCharmMiscProject/raw/main/Sampleroom.png"
+    
+    try:
+        # First try local file
+        img = Image.open(image_path)
+        w, h = img.size
+        img_resized = img.resize((w // 2, h // 2))
+        return img_resized
+    except:
+        try:
+            # Fallback to GitHub URL
+            img = Image.open(urlopen(image_url))
+            w, h = img.size
+            img_resized = img.resize((w // 2, h // 2))
+            return img_resized
+        except:
+            return None
+
+img_resized = load_shelf_image()
+if img_resized:
     st.image(img_resized, caption="Shelf Image", use_container_width=False)
-except Exception as e:
-    st.info("Sampleroom.png not found or cannot be opened.")
+else:
+    st.info("Shelf image not available")
 
 uploaded_file = st.file_uploader("Upload your Excel Inventory File", type=["xlsx"])
 if not uploaded_file:
