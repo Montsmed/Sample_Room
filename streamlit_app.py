@@ -122,6 +122,7 @@ if not uploaded_file:
 uploaded_file.seek(0)
 if "main_data" not in st.session_state:
     st.session_state["main_data"] = load_data(uploaded_file)
+
 data = st.session_state["main_data"]
 
 # --- Search ---
@@ -143,8 +144,6 @@ st.markdown("### Click a shelf layer to view/edit its items:")
 
 if "selected_layer" not in st.session_state:
     st.session_state["selected_layer"] = None
-if "last_selected_layer" not in st.session_state:
-    st.session_state["last_selected_layer"] = None
 
 # --- Layer Selection Buttons ---
 for layer_num in LAYER_ORDER:
@@ -186,7 +185,7 @@ for layer_num in LAYER_ORDER:
                 if st.button(f"Select {layer_label}", key=f"btn_{layer_label}"):
                     # --- Save edits of previous layer before switching ---
                     prev_layer = st.session_state.get("selected_layer")
-                    if prev_layer:
+                    if prev_layer and prev_layer != layer_label:
                         prev_key = f"temp_edits_{prev_layer}"
                         if prev_key in st.session_state:
                             prev_edits = st.session_state[prev_key]
@@ -204,33 +203,29 @@ for layer_num in LAYER_ORDER:
         else:
             cols[idx + 1].markdown("")
 
-selected_layer = st.session_state["selected_layer"]
+selected_layer = st.session_state.get("selected_layer", None)
 
 if selected_layer:
     data = st.session_state["main_data"]
-    layer_data = data[data["Location"] == selected_layer].reset_index(drop=True)
-    st.markdown(f"## Items in **{selected_layer}**")
-    editor_key = f"editor_{selected_layer}"
     layer_key = f"temp_edits_{selected_layer}"
-
-    # --- Only initialize temp memory for this layer if not present ---
+    # Only initialize temp memory for this layer if not present
     if layer_key not in st.session_state:
+        layer_data = data[data["Location"] == selected_layer].reset_index(drop=True)
         if not layer_data.empty:
             st.session_state[layer_key] = layer_data.copy()
         else:
             st.session_state[layer_key] = pd.DataFrame(columns=data.columns)
 
-    # --- Use session state as single source of truth for editor ---
+    # Use session state as single source of truth for editor
     editor_value = st.session_state[layer_key]
 
     edited_data = st.data_editor(
         editor_value,
         num_rows="dynamic",
         use_container_width=True,
-        key=editor_key
+        key=f"editor_{selected_layer}"
     )
-
-    # --- Always update temp memory with latest edits (do NOT save to main data here) ---
+    # Only update temp memory, do NOT touch main_data or rerun
     st.session_state[layer_key] = ensure_dataframe(edited_data, data.columns)
 
     # --- Gallery: Multiple images per row, fixed width 200px ---
