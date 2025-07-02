@@ -47,7 +47,7 @@ def load_shelf_image():
         try:
             img = Image.open(requests.get(image_url, stream=True).raw)
             w, h = img.size
-            return img.resize((w // 2, h // 2))
+            return img.resize((w // 4, h // 4))
         except:
             return None
 
