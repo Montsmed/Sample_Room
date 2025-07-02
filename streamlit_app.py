@@ -144,16 +144,51 @@ if selected_layer:
             key=f"editor_{selected_layer}"
         )
 
-        # Then show the selectbox below the data editor
-        st.markdown("**Select an item to view its image**")
-        row_idx = st.selectbox(
-            "Select an item to view its image:",
-            options=range(len(layer_data)),
-            format_func=lambda x: layer_data.iloc[x]["Description"],
-            key=f"row_select_{selected_layer}"
+        # Show all images in the layer as a gallery below the editor
+        st.markdown("### Images in this shelf layer:")
+        for idx, row in layer_data.iterrows():
+            image_url = str(row["Image_URL"]).strip()
+            if image_url and image_url.lower() != "nan":
+                try:
+                    response = requests.get(image_url)
+                    img = Image.open(BytesIO(response.content))
+                    w, h = img.size
+                    max_dim = 1600
+                    scale = min(max_dim / w, max_dim / h, 1)
+                    new_width = int(w * scale)
+                    new_height = int(h * scale)
+                    img_resized = img.resize((new_width, new_height))
+                    st.image(img_resized, caption=f"{row['Description']}", use_container_width=False)
+                except Exception:
+                    st.info(f"Image for {row['Description']} could not be loaded.")
+            # Optionally, show info for missing images:
+            # else:
+            #     st.info(f"No image available for {row['Description']}.")
+
+    # --- Save Logic ---
+    if st.button("Save Changes"):
+        if layer_data.empty and not edited_data.empty:
+            edited_data["Location"] = selected_layer
+            data = pd.concat([data, edited_data], ignore_index=True)
+            st.success(f"Added {len(edited_data)} new items to {selected_layer}!")
+        else:
+            data.update(edited_data)
+            st.success("Changes saved!")
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            data.to_excel(writer, index=False)
+        output.seek(0)
+        
+        st.download_button(
+            label="Download Updated Excel File",
+            data=output,
+            file_name="updated_inventory.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        if row_idx is not None:
-            st.session_state["selected_row"] = row_idx
+else:
+    st.info("Click a shelf layer above to view its items.")
+
 
         # Show image for selected row
         if st.session_state.get("selected_row") is not None:
