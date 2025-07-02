@@ -136,6 +136,15 @@ if selected_layer:
             key=f"editor_{selected_layer}"
         )
     else:
+        # Show the data editor first (hide Image_URL in editor)
+        edited_data = st.data_editor(
+            layer_data.drop(columns=["Image_URL"]),
+            num_rows="dynamic",
+            use_container_width=True,
+            key=f"editor_{selected_layer}"
+        )
+
+        # Then show the selectbox below the data editor
         st.markdown("**Select an item to view its image**")
         row_idx = st.selectbox(
             "Select an item to view its image:",
@@ -146,16 +155,8 @@ if selected_layer:
         if row_idx is not None:
             st.session_state["selected_row"] = row_idx
 
-        # Always show the data editor first (hide Image_URL in editor)
-        edited_data = st.data_editor(
-            layer_data.drop(columns=["Image_URL"]),
-            num_rows="dynamic",
-            use_container_width=True,
-            key=f"editor_{selected_layer}"
-        )
-
-        # Then show the image below the editor
-        if st.session_state["selected_row"] is not None:
+        # Show image for selected row
+        if st.session_state.get("selected_row") is not None:
             row = layer_data.iloc[st.session_state["selected_row"]]
             image_url = str(row["Image_URL"]).strip()
             if image_url and image_url.lower() != "nan":
