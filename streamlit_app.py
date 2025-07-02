@@ -176,29 +176,27 @@ if selected_layer:
     
     if layer_data.empty:
         st.info("No items in this layer. Add new items below:")
-        empty_df = pd.DataFrame(columns=data.columns)
+        editor_initial = pd.DataFrame(columns=data.columns)
     else:
-        empty_df = None
+        editor_initial = layer_data.copy()
 
-    # Unique editor key for persistence
+    # Unique editor key for persistence (not the widget key!)
+    persist_key = f"persisted_{selected_layer}"
     editor_key = f"editor_{selected_layer}"
 
     # Load data for editor: from session_state if exists, else from DataFrame or empty
-    if editor_key in st.session_state:
-        editor_data = st.session_state[editor_key]
+    if persist_key in st.session_state:
+        editor_value = st.session_state[persist_key]
     else:
-        editor_data = empty_df if empty_df is not None else layer_data.copy()
+        editor_value = editor_initial
 
-    # Show editor
+    # Show editor (Streamlit manages st.session_state[editor_key])
     edited_data = st.data_editor(
-        editor_data,
+        editor_value,
         num_rows="dynamic",
         use_container_width=True,
         key=editor_key
     )
-
-    # Save edits to session_state on every rerun
-    st.session_state[editor_key] = edited_data
 
     # --- Gallery: Multiple images per row, fixed width 200px ---
     st.markdown("### Images in this shelf layer:")
@@ -252,26 +250,25 @@ if selected_layer:
 
     # --- Save Logic ---
     if st.button("Save Changes", key=f"save_{selected_layer}"):
-        if empty_df is not None and not edited_data.empty:
+        # Persist the edits for this shelf/layer
+        st.session_state[persist_key] = edited_data
+
+        # Update the main DataFrame
+        # Remove old entries for this shelf
+        data = data[data["Location"] != selected_layer]
+        # Append new entries
+        if not edited_data.empty:
             edited_data["Location"] = selected_layer
-            # Remove old entries for this shelf
-            data = data[data["Location"] != selected_layer]
-            # Append new entries
             data = pd.concat([data, edited_data], ignore_index=True)
-            st.success(f"Added {len(edited_data)} new items to {selected_layer}!")
+            st.success(f"Saved {len(edited_data)} items for {selected_layer}!")
         else:
-            # Update existing data
-            for idx, row in edited_data.iterrows():
-                data_idx = data[(data["Location"] == selected_layer) & (data.index == row.name)].index
-                if not data_idx.empty:
-                    data.loc[data_idx, :] = row
-            st.success("Changes saved!")
-        
+            st.success("No items to save for this shelf.")
+
+        # Download updated Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             data.to_excel(writer, index=False)
         output.seek(0)
-        
         st.download_button(
             label="Download Updated Excel File",
             data=output,
