@@ -21,8 +21,36 @@ PLACEHOLDER_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main
 @st.cache_data
 def load_inventory_data():
     """Load inventory data - starts empty, user must upload Excel file"""
-    # Return empty dataframe with correct column structure
-    return pd.DataFrame(columns=['Location', 'Description', 'Unit', 'Model', 'SN/Lot', 'Remark', 'Image_URL'])
+    # Return empty dataframe with correct column structure and proper data types
+    return pd.DataFrame({
+        'Location': pd.Series([], dtype='string'),
+        'Description': pd.Series([], dtype='string'),
+        'Unit': pd.Series([], dtype='int64'),
+        'Model': pd.Series([], dtype='string'),
+        'SN/Lot': pd.Series([], dtype='string'),
+        'Remark': pd.Series([], dtype='string'),
+        'Image_URL': pd.Series([], dtype='string')
+    })
+
+def clean_dataframe_types(df):
+    """Clean and standardize DataFrame column types for Arrow compatibility"""
+    df_clean = df.copy()
+    
+    # Convert all columns to appropriate types
+    df_clean['Location'] = df_clean['Location'].astype('string')
+    df_clean['Description'] = df_clean['Description'].astype('string')
+    df_clean['Unit'] = pd.to_numeric(df_clean['Unit'], errors='coerce').fillna(0).astype('int64')
+    df_clean['Model'] = df_clean['Model'].astype('string')
+    df_clean['SN/Lot'] = df_clean['SN/Lot'].astype('string')
+    df_clean['Remark'] = df_clean['Remark'].astype('string')
+    df_clean['Image_URL'] = df_clean['Image_URL'].astype('string')
+    
+    # Replace NaN values with empty strings for string columns
+    string_columns = ['Location', 'Description', 'Model', 'SN/Lot', 'Remark', 'Image_URL']
+    for col in string_columns:
+        df_clean[col] = df_clean[col].fillna('')
+    
+    return df_clean
 
 def convert_df_to_excel(df):
     """Convert dataframe to Excel format for download"""
@@ -103,6 +131,9 @@ def create_file_management():
                 # Read the uploaded Excel file
                 new_data = pd.read_excel(uploaded_file)
                 
+                # Clean the data types
+                new_data = clean_dataframe_types(new_data)
+                
                 # Validate required columns
                 required_columns = ['Location', 'Description', 'Unit', 'Model', 'SN/Lot', 'Remark', 'Image_URL']
                 missing_columns = [col for col in required_columns if col not in new_data.columns]
@@ -123,9 +154,10 @@ def create_file_management():
                     
                     with col_b:
                         if st.button("➕ Add to Current Data", key="add_data"):
-                            st.session_state.inventory_data = pd.concat([
+                            combined_data = pd.concat([
                                 st.session_state.inventory_data, new_data
                             ], ignore_index=True)
+                            st.session_state.inventory_data = clean_dataframe_types(combined_data)
                             st.success("Data has been added to current inventory!")
                             st.rerun()
                         
@@ -158,7 +190,7 @@ def create_file_management():
             st.info("No data available to download. Please upload an Excel file first.")
             
             # Provide template download
-            template_data = pd.DataFrame(columns=['Location', 'Description', 'Unit', 'Model', 'SN/Lot', 'Remark', 'Image_URL'])
+            template_data = load_inventory_data()
             template_excel = convert_df_to_excel(template_data)
             
             st.download_button(
@@ -204,13 +236,13 @@ def create_shelf_visualization():
                 layer_indicator = "🔝" if layer == 4 else "🔼" if layer == 3 else "🔽" if layer == 2 else "🔻"
                 button_text = f"{layer_indicator} {location} ({item_count} items)"
                 
-                # Color coding based on layer
+                # Color coding based on layer - Fixed button type issue
                 if layer == 4:
                     button_type = "primary"
                 elif layer == 3:
                     button_type = "secondary"
                 else:
-                    button_type = None
+                    button_type = "tertiary"  # Changed from None to "tertiary"
                 
                 if st.button(button_text, key=f"btn_{location}", type=button_type):
                     st.session_state.selected_location = location
@@ -251,11 +283,14 @@ def create_inventory_editor():
                 'Remark': [''],
                 'Image_URL': ['']
             })
-            st.session_state.inventory_data = pd.concat([
-                st.session_state.inventory_data, new_row
-            ], ignore_index=True)
+            new_row = clean_dataframe_types(new_row)
+            combined_data = pd.concat([st.session_state.inventory_data, new_row], ignore_index=True)
+            st.session_state.inventory_data = clean_dataframe_types(combined_data)
             st.rerun()
         return
+    
+    # Clean data types before displaying
+    location_data = clean_dataframe_types(location_data)
     
     # Add row index for deletion
     location_data = location_data.reset_index(drop=True)
@@ -293,12 +328,12 @@ def create_inventory_editor():
     # Update session state with edited data
     if grid_response['data'] is not None:
         edited_data = grid_response['data'].drop('Select', axis=1)
+        edited_data = clean_dataframe_types(edited_data)
         # Update the main dataframe
         mask = st.session_state.inventory_data['Location'] == location
-        st.session_state.inventory_data = st.session_state.inventory_data[~mask]
-        st.session_state.inventory_data = pd.concat([
-            st.session_state.inventory_data, edited_data
-        ], ignore_index=True)
+        remaining_data = st.session_state.inventory_data[~mask]
+        combined_data = pd.concat([remaining_data, edited_data], ignore_index=True)
+        st.session_state.inventory_data = clean_dataframe_types(combined_data)
     
     # Action buttons
     col1, col2, col3, col4 = st.columns(4)
@@ -314,9 +349,9 @@ def create_inventory_editor():
                 'Remark': [''],
                 'Image_URL': ['']
             })
-            st.session_state.inventory_data = pd.concat([
-                st.session_state.inventory_data, new_row
-            ], ignore_index=True)
+            new_row = clean_dataframe_types(new_row)
+            combined_data = pd.concat([st.session_state.inventory_data, new_row], ignore_index=True)
+            st.session_state.inventory_data = clean_dataframe_types(combined_data)
             st.rerun()
     
     with col2:
@@ -333,10 +368,9 @@ def create_inventory_editor():
                 
                 # Update main dataframe
                 mask = st.session_state.inventory_data['Location'] == location
-                st.session_state.inventory_data = st.session_state.inventory_data[~mask]
-                st.session_state.inventory_data = pd.concat([
-                    st.session_state.inventory_data, remaining_data
-                ], ignore_index=True)
+                other_data = st.session_state.inventory_data[~mask]
+                combined_data = pd.concat([other_data, remaining_data], ignore_index=True)
+                st.session_state.inventory_data = clean_dataframe_types(combined_data)
                 
                 st.success(f"Deleted {len(selected_indices)} item(s)")
                 st.rerun()
@@ -386,7 +420,7 @@ def create_image_gallery():
                 item = location_data.iloc[item_idx]
                 with cols[col_idx]:
                     try:
-                        if item['Image_URL'] and item['Image_URL'].strip():
+                        if item['Image_URL'] and str(item['Image_URL']).strip() and str(item['Image_URL']) != 'nan':
                             st.image(
                                 item['Image_URL'],
                                 caption=f"{item['Description']}\nModel: {item['Model']}\nSN/Lot: {item['SN/Lot']}",
@@ -448,8 +482,9 @@ def create_statistics_sidebar():
         
         # Items with images
         items_with_images = len(st.session_state.inventory_data[
-            st.session_state.inventory_data['Image_URL'].notna() & 
-            (st.session_state.inventory_data['Image_URL'] != '')
+            (st.session_state.inventory_data['Image_URL'].notna()) & 
+            (st.session_state.inventory_data['Image_URL'] != '') &
+            (st.session_state.inventory_data['Image_URL'] != 'nan')
         ])
         st.metric("Items with Images", items_with_images)
         
