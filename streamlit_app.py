@@ -131,7 +131,7 @@ def create_search_bar():
         st.info("Type in the search box to find items by description, SN/Lot, or model.")
 
 def create_file_management():
-    """Create file upload and download section - automatic import on upload"""
+    """Create file upload and download section - removed previews"""
     st.markdown("## 📁 File Management")
     
     # Show initial message if no data
@@ -164,10 +164,23 @@ def create_file_management():
                     st.error(f"Missing required columns: {', '.join(missing_columns)}")
                     st.info("Please ensure your Excel file has these columns: Location, Description, Unit, Model, SN/Lot, Remark, Image_URL")
                 else:
-                    # Automatically import the data
-                    st.session_state.inventory_data = new_data
-                    st.success(f"✅ File uploaded and imported successfully! {len(new_data)} items loaded.")
-                    st.rerun()
+                    st.success("✅ File uploaded successfully!")
+                    
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if st.button("🔄 Replace Current Data", key="replace_data"):
+                            st.session_state.inventory_data = new_data
+                            st.success("Inventory data has been updated!")
+                            st.rerun()
+                    
+                    with col_b:
+                        if st.button("➕ Add to Current Data", key="add_data"):
+                            combined_data = pd.concat([
+                                st.session_state.inventory_data, new_data
+                            ], ignore_index=True)
+                            st.session_state.inventory_data = clean_dataframe_types(combined_data)
+                            st.success("Data has been added to current inventory!")
+                            st.rerun()
                         
             except Exception as e:
                 st.error(f"Error reading Excel file: {e}")
