@@ -227,7 +227,7 @@ def create_shelf_visualization():
     except:
         st.error("Could not load sample room image from GitHub")
     
-    st.markdown("### 🗄️ Shelf Layout (5×4 Grid)")
+    st.markdown("### 🗄️ Shelf Layout")
     st.markdown("**Layer arrangement: 4 (Top) → 3 → 2 → 1 (Bottom)**")
     
     if len(st.session_state.inventory_data) == 0:
@@ -528,12 +528,7 @@ def create_statistics_sidebar():
             (st.session_state.inventory_data['Image_URL'] != 'nan')
         ])
         st.metric("Items with Images", items_with_images)
-        
-        # Items by status
-        functional_items = len(st.session_state.inventory_data[
-            st.session_state.inventory_data['Remark'].str.contains('Functional', na=False)
-        ])
-        st.metric("Functional Items", functional_items)
+
 
 # Main app
 def main():
