@@ -1,9 +1,11 @@
+# app.py
 import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 import requests
 from io import BytesIO
-import base64
+from utility import check_password
+import xlsxwriter
 
 # Configure page
 st.set_page_config(
@@ -12,50 +14,57 @@ st.set_page_config(
     layout="wide"
 )
 
+# Check password before proceeding
+if not check_password():
+    st.stop()
+
+# GitHub image URLs
+SAMPLE_ROOM_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/Sampleroom.png"
+PLACEHOLDER_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/No_Image.jpg"
+
 # Load data from Excel file
 @st.cache_data
 def load_inventory_data():
-    """Load inventory data from Excel file"""
-    try:
-        # Replace with your actual GitHub raw file URL
-        url = "https://raw.githubusercontent.com/your-repo/your-file/main/updated_inventory.xlsx"
-        df = pd.read_excel(url)
-        return df
-    except:
-        # Fallback data based on your Excel structure
-        data = {
-            'Location': ['A1', 'A1', 'A1', 'A2', 'A2', 'A3', 'A3', 'B1', 'B2', 'B3', 
-                        'C1', 'C1', 'C1', 'C1', 'C1', 'C1', 'C1', 'C1', 'C2', 'C2', 'D1', 'E4'],
-            'Description': ['BNS RF Lesion Generator for Neurosurgery', 'Codman Electrosurgical Generator', 
-                           'Elliquence Surgi-Max Plus', 'Integra Duo Headlight & Accessory', 'Lextec Lightsource',
-                           'BNS 4-Channel RF Lesion Generator', 'BNS RF Lesion Generator for Neurosurgery',
-                           'Mayfield Stuff', 'Omni-Tract Stuff', 'Stuff', 'Codman Certas Plus', 'Codman Certas Plus',
-                           'Codman Licox PtO2 Monitor', 'Codman Medos Valve Programmer', 'Codman Medos Valve Programmer',
-                           'Integra LicocCMP Tissue Oxygen Pressure Monitor', 'Integra Luxtec Lightsource',
-                           'Integra Luxtec Lightsource', 'Stuff', 'UX100', 'Hakim Programmer', 'Touchstone Stuff'],
-            'Unit': [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5, 3, 1],
-            'Model': ['RFE2-C', '901001ESUO', 'IEC4-SP', '90600', '00MLX', 'RFE4-B', 'RFE2-C', '', '', '',
-                     '82-8852', '82-8852', 'LCX02', '82-3126', '82-3126', '144733', '00MLX', '00MLX', '', 'UX100', '823190R', ''],
-            'SN/Lot': ['', '', '', '', '', '', '', '', '', '', '', '', '2150601326', '847', '1173', '1629',
-                      '16G00MLX7347', '16K00MLX7896', '', '', '', ''],
-            'Remark': ['', '', '', '', '', '', '', '', '', '', 'System Failure, Missing Magnet', 'Unable to power-on',
-                      'Functional', 'Functional', 'Functional', 'Missing Power Supply', 'GHK Trade-in, Dead motherboard',
-                      'STH Trade-in, Dead motherboard', '', '', '', ''],
-            'Image_URL': ['https://www.bnsmed.com/data/watermark/20200924/5f6c31aea1382.jpg',
-                         'https://products.integralife.com/ccstore/v1/images/?source=/file/products/Codman%20Electrosurgical%20Generator%20OS%201%20Image.jpg',
-                         'https://www.elliquence.com/wp-content/uploads/2016/01/Surgi-Max-Plus-Device.jpg',
-                         '', '', '', '', '', '', '', 
-                         'https://products.integralife.com/ccstore/v1/images/?source=/file/v3841902670343812321/products/ETK_01.png',
-                         'https://products.integralife.com/ccstore/v1/images/?source=/file/v3841902670343812321/products/ETK_01.png',
-                         'https://products.integralife.com/ccstore/v1/images/?source=/file/v7357354864197611707/collections/licox.jpg',
-                         'https://products.integralife.com/ccstore/v1/images/?source=/file/v5137398853523069574/products/823190.jpg',
-                         'https://products.integralife.com/ccstore/v1/images/?source=/file/v5137398853523069574/products/823190.jpg',
-                         'https://products.integralife.com/ccstore/v1/images/?source=/file/v7357354864197611707/collections/licox.jpg',
-                         'https://products.integralife.com/ccstore/v1/images/?source=/file/v6400991064904479991/products/MLX-300-Xenon-Lightsources.jpg',
-                         'https://products.integralife.com/ccstore/v1/images/?source=/file/v6400991064904479991/products/MLX-300-Xenon-Lightsources.jpg',
-                         '', '', '', '']
-        }
-        return pd.DataFrame(data)
+    """Load inventory data - starts empty, user must upload Excel file"""
+    # Return empty dataframe with correct column structure
+    return pd.DataFrame(columns=['Location', 'Description', 'Unit', 'Model', 'SN/Lot', 'Remark', 'Image_URL'])
+
+def convert_df_to_excel(df):
+    """Convert dataframe to Excel format for download"""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Inventory')
+        
+        # Get the xlsxwriter workbook and worksheet objects
+        workbook = writer.book
+        worksheet = writer.sheets['Inventory']
+        
+        # Add some formatting
+        header_format = workbook.add_format({
+            'bold': True,
+            'text_wrap': True,
+            'valign': 'top',
+            'fg_color': '#D7E4BC',
+            'border': 1
+        })
+        
+        # Write the column headers with the defined format
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, header_format)
+        
+        # Auto-adjust column widths
+        for i, col in enumerate(df.columns):
+            if len(df) > 0:  # Only if dataframe has data
+                max_length = max(
+                    df[col].astype(str).map(len).max(),
+                    len(str(col))
+                ) + 2
+            else:
+                max_length = len(str(col)) + 2
+            worksheet.set_column(i, i, min(max_length, 50))
+    
+    processed_data = output.getvalue()
+    return processed_data
 
 # Initialize session state
 if 'inventory_data' not in st.session_state:
@@ -63,53 +72,179 @@ if 'inventory_data' not in st.session_state:
 if 'selected_location' not in st.session_state:
     st.session_state.selected_location = None
 
-# Define shelf structure
+# Define shelf structure with layers ordered from top to bottom (4 to 1)
 SHELF_STRUCTURE = {
-    'A': [1, 2, 3],
-    'B': [1, 2, 3],
-    'C': [1, 2, 3, 4],
-    'D': [1, 2, 3, 4],
-    'E': [4]
+    'A': [3, 2, 1],  # Top to bottom
+    'B': [3, 2, 1],  # Top to bottom
+    'C': [4, 3, 2, 1],  # Top to bottom
+    'D': [4, 3, 2, 1],  # Top to bottom
+    'E': [4]  # Only top layer
 }
 
-def create_shelf_visualization():
-    """Create interactive shelf visualization"""
-    st.markdown("## 📦 Inventory Management System")
+def create_header():
+    """Create header with logout option"""
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("## 📦 Inventory Management System")
+    with col2:
+        if st.button("🚪 Logout", key="logout_btn"):
+            # Clear password session state
+            for key in ['password_correct', 'password']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+
+def create_file_management():
+    """Create file upload and download section"""
+    st.markdown("## 📁 File Management")
     
-    # Room layout image
+    # Show initial message if no data
+    if len(st.session_state.inventory_data) == 0:
+        st.info("🚀 Welcome! Please upload an Excel file to get started with your inventory management.")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 📤 Upload Excel File")
+        uploaded_file = st.file_uploader(
+            "Choose an Excel file to load inventory data",
+            type=['xlsx', 'xls'],
+            help="Upload an Excel file with columns: Location, Description, Unit, Model, SN/Lot, Remark, Image_URL"
+        )
+        
+        if uploaded_file is not None:
+            try:
+                # Read the uploaded Excel file
+                new_data = pd.read_excel(uploaded_file)
+                
+                # Validate required columns
+                required_columns = ['Location', 'Description', 'Unit', 'Model', 'SN/Lot', 'Remark', 'Image_URL']
+                missing_columns = [col for col in required_columns if col not in new_data.columns]
+                
+                if missing_columns:
+                    st.error(f"Missing required columns: {', '.join(missing_columns)}")
+                    st.info("Please ensure your Excel file has these columns: Location, Description, Unit, Model, SN/Lot, Remark, Image_URL")
+                else:
+                    st.success("✅ File uploaded successfully!")
+                    st.dataframe(new_data.head())
+                    
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if st.button("🔄 Replace Current Data", key="replace_data"):
+                            st.session_state.inventory_data = new_data
+                            st.success("Inventory data has been updated!")
+                            st.rerun()
+                    
+                    with col_b:
+                        if st.button("➕ Add to Current Data", key="add_data"):
+                            st.session_state.inventory_data = pd.concat([
+                                st.session_state.inventory_data, new_data
+                            ], ignore_index=True)
+                            st.success("Data has been added to current inventory!")
+                            st.rerun()
+                        
+            except Exception as e:
+                st.error(f"Error reading Excel file: {e}")
+                st.info("Please make sure the file is a valid Excel file (.xlsx or .xls)")
+    
+    with col2:
+        st.markdown("### 📥 Download Excel File")
+        
+        if len(st.session_state.inventory_data) > 0:
+            st.write("Download the current inventory data as an Excel file")
+            
+            # Convert dataframe to Excel
+            excel_data = convert_df_to_excel(st.session_state.inventory_data)
+            
+            # Create download button
+            st.download_button(
+                label="📥 Download Inventory Data",
+                data=excel_data,
+                file_name=f"inventory_data_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Download the current inventory data as an Excel file"
+            )
+            
+            # Show data preview
+            st.markdown("**Current Data Preview:**")
+            st.dataframe(st.session_state.inventory_data.head())
+        else:
+            st.info("No data available to download. Please upload an Excel file first.")
+            
+            # Provide template download
+            template_data = pd.DataFrame(columns=['Location', 'Description', 'Unit', 'Model', 'SN/Lot', 'Remark', 'Image_URL'])
+            template_excel = convert_df_to_excel(template_data)
+            
+            st.download_button(
+                label="📋 Download Template",
+                data=template_excel,
+                file_name="inventory_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Download an empty template to fill with your inventory data"
+            )
+
+def create_shelf_visualization():
+    """Create interactive shelf visualization with proper layer ordering"""
+    # Room layout image from GitHub
     st.markdown("### 🏠 Sample Room Layout")
-    # Replace with your actual GitHub image URL
-    room_layout_url = "https://via.placeholder.com/800x400/e1f5fe/01579b?text=Sample+Room+Layout"
-    st.image(room_layout_url, caption="Sample Room Layout", use_container_width=True)
+    try:
+        st.image(SAMPLE_ROOM_IMAGE, caption="Sample Room Layout", use_container_width=True)
+    except:
+        st.error("Could not load sample room image from GitHub")
     
     st.markdown("### 🗄️ Shelf Layout")
+    st.markdown("**Layer arrangement: 4 (Top) → 3 → 2 → 1 (Bottom)**")
+    
+    if len(st.session_state.inventory_data) == 0:
+        st.info("📤 Upload an Excel file to see inventory items in the shelf locations.")
+        return
+    
     st.markdown("Click on any shelf location to view and edit inventory items:")
     
-    # Create shelf visualization with buttons
+    # Create shelf visualization with buttons (top to bottom layout)
     cols = st.columns(5)
     
     for i, (shelf, layers) in enumerate(SHELF_STRUCTURE.items()):
         with cols[i]:
             st.markdown(f"**Shelf {shelf}**")
+            # Display layers from top to bottom
             for layer in layers:
                 location = f"{shelf}{layer}"
                 item_count = len(st.session_state.inventory_data[
                     st.session_state.inventory_data['Location'] == location
                 ])
                 
-                button_text = f"{location} ({item_count} items)"
-                if st.button(button_text, key=f"btn_{location}"):
+                # Add visual indicators for layer position
+                layer_indicator = "🔝" if layer == 4 else "🔼" if layer == 3 else "🔽" if layer == 2 else "🔻"
+                button_text = f"{layer_indicator} {location} ({item_count} items)"
+                
+                # Color coding based on layer
+                if layer == 4:
+                    button_type = "primary"
+                elif layer == 3:
+                    button_type = "secondary"
+                else:
+                    button_type = None
+                
+                if st.button(button_text, key=f"btn_{location}", type=button_type):
                     st.session_state.selected_location = location
                     st.rerun()
 
 def create_inventory_editor():
-    """Create inventory editor for selected location"""
+    """Create inventory editor for selected location with delete functionality"""
+    if len(st.session_state.inventory_data) == 0:
+        st.info("📤 Please upload an Excel file first to start managing your inventory.")
+        return
+        
     if st.session_state.selected_location is None:
         st.info("👆 Please select a shelf location above to view and edit inventory items.")
         return
     
     location = st.session_state.selected_location
-    st.markdown(f"## 📝 Inventory Editor - Location {location}")
+    layer_num = location[-1]
+    layer_position = "Top" if layer_num == "4" else "Upper" if layer_num == "3" else "Lower" if layer_num == "2" else "Bottom"
+    
+    st.markdown(f"## 📝 Inventory Editor - Location {location} ({layer_position} Layer)")
     
     # Filter data for selected location
     location_data = st.session_state.inventory_data[
@@ -136,6 +271,10 @@ def create_inventory_editor():
             st.rerun()
         return
     
+    # Add row index for deletion
+    location_data = location_data.reset_index(drop=True)
+    location_data.insert(0, 'Select', False)
+    
     # Configure grid options
     gb = GridOptionsBuilder.from_dataframe(location_data)
     gb.configure_default_column(
@@ -144,9 +283,10 @@ def create_inventory_editor():
         sortable=True,
         filter=True
     )
-    gb.configure_column('Location', editable=False)  # Location shouldn't be editable
+    gb.configure_column('Select', editable=True, checkboxSelection=True, headerCheckboxSelection=True)
+    gb.configure_column('Location', editable=False)
     gb.configure_column('Image_URL', width=200)
-    gb.configure_selection(selection_mode="single", use_checkbox=True)
+    gb.configure_selection(selection_mode="multiple", use_checkbox=True)
     gb.configure_pagination(enabled=True, paginationPageSize=10)
     
     grid_options = gb.build()
@@ -166,7 +306,7 @@ def create_inventory_editor():
     
     # Update session state with edited data
     if grid_response['data'] is not None:
-        edited_data = grid_response['data']
+        edited_data = grid_response['data'].drop('Select', axis=1)
         # Update the main dataframe
         mask = st.session_state.inventory_data['Location'] == location
         st.session_state.inventory_data = st.session_state.inventory_data[~mask]
@@ -175,7 +315,7 @@ def create_inventory_editor():
         ], ignore_index=True)
     
     # Action buttons
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         if st.button("➕ Add New Item", key=f"add_{location}"):
@@ -194,18 +334,45 @@ def create_inventory_editor():
             st.rerun()
     
     with col2:
-        if st.button("💾 Save Changes", key=f"save_{location}"):
-            # Here you would typically save to your Excel file or database
-            st.success("Changes saved successfully!")
+        if st.button("🗑️ Delete Selected", key=f"delete_{location}"):
+            if grid_response['selected_rows'] is not None and len(grid_response['selected_rows']) > 0:
+                selected_indices = [row['_selectedRowNodeInfo']['nodeRowIndex'] for row in grid_response['selected_rows']]
+                # Get the original data without the Select column
+                current_location_data = st.session_state.inventory_data[
+                    st.session_state.inventory_data['Location'] == location
+                ].reset_index(drop=True)
+                
+                # Remove selected rows
+                remaining_data = current_location_data.drop(selected_indices).reset_index(drop=True)
+                
+                # Update main dataframe
+                mask = st.session_state.inventory_data['Location'] == location
+                st.session_state.inventory_data = st.session_state.inventory_data[~mask]
+                st.session_state.inventory_data = pd.concat([
+                    st.session_state.inventory_data, remaining_data
+                ], ignore_index=True)
+                
+                st.success(f"Deleted {len(selected_indices)} item(s)")
+                st.rerun()
+            else:
+                st.warning("Please select rows to delete")
     
     with col3:
-        if st.button("🔄 Refresh Data", key=f"refresh_{location}"):
-            st.session_state.inventory_data = load_inventory_data()
-            st.rerun()
+        if st.button("💾 Save Changes", key=f"save_{location}"):
+            st.success("Changes saved successfully!")
+    
+    with col4:
+        if st.button("🔄 Clear Location", key=f"clear_{location}"):
+            if st.button("⚠️ Confirm Clear All", key=f"confirm_clear_{location}"):
+                # Remove all items from this location
+                mask = st.session_state.inventory_data['Location'] == location
+                st.session_state.inventory_data = st.session_state.inventory_data[~mask]
+                st.success(f"Cleared all items from location {location}")
+                st.rerun()
 
 def create_image_gallery():
-    """Create image gallery for selected location"""
-    if st.session_state.selected_location is None:
+    """Create image gallery for selected location using GitHub placeholder"""
+    if len(st.session_state.inventory_data) == 0 or st.session_state.selected_location is None:
         return
     
     location = st.session_state.selected_location
@@ -213,98 +380,79 @@ def create_image_gallery():
         st.session_state.inventory_data['Location'] == location
     ]
     
-    # Filter items with image URLs
-    items_with_images = location_data[
-        location_data['Image_URL'].notna() & 
-        (location_data['Image_URL'] != '')
-    ]
-    
-    if items_with_images.empty:
-        st.info(f"No images available for items in location {location}")
+    if location_data.empty:
         return
     
-    st.markdown(f"## 🖼️ Image Gallery - Location {location}")
+    layer_num = location[-1]
+    layer_position = "Top" if layer_num == "4" else "Upper" if layer_num == "3" else "Lower" if layer_num == "2" else "Bottom"
+    
+    st.markdown(f"## 🖼️ Image Gallery - Location {location} ({layer_position} Layer)")
     
     # Create image gallery
     cols_per_row = 3
-    rows = len(items_with_images) // cols_per_row + (1 if len(items_with_images) % cols_per_row > 0 else 0)
+    rows = len(location_data) // cols_per_row + (1 if len(location_data) % cols_per_row > 0 else 0)
     
     for row in range(rows):
         cols = st.columns(cols_per_row)
         for col_idx in range(cols_per_row):
             item_idx = row * cols_per_row + col_idx
-            if item_idx < len(items_with_images):
-                item = items_with_images.iloc[item_idx]
+            if item_idx < len(location_data):
+                item = location_data.iloc[item_idx]
                 with cols[col_idx]:
                     try:
-                        if item['Image_URL']:
+                        if item['Image_URL'] and item['Image_URL'].strip():
                             st.image(
                                 item['Image_URL'],
-                                caption=f"{item['Description']}\nModel: {item['Model']}",
+                                caption=f"{item['Description']}\nModel: {item['Model']}\nSN/Lot: {item['SN/Lot']}",
                                 use_container_width=True
                             )
                         else:
-                            # Placeholder image
-                            placeholder_url = "https://via.placeholder.com/300x200/f5f5f5/999999?text=No+Image"
+                            # Use GitHub placeholder image
                             st.image(
-                                placeholder_url,
-                                caption=f"{item['Description']}\nModel: {item['Model']}",
+                                PLACEHOLDER_IMAGE,
+                                caption=f"{item['Description']}\nModel: {item['Model']}\nSN/Lot: {item['SN/Lot']}",
                                 use_container_width=True
                             )
                     except:
-                        # Fallback placeholder
-                        placeholder_url = "https://via.placeholder.com/300x200/f5f5f5/999999?text=Image+Error"
+                        # Fallback to GitHub placeholder
                         st.image(
-                            placeholder_url,
-                            caption=f"{item['Description']}\nModel: {item['Model']}",
+                            PLACEHOLDER_IMAGE,
+                            caption=f"{item['Description']}\nModel: {item['Model']}\nSN/Lot: {item['SN/Lot']}",
                             use_container_width=True
                         )
 
 def create_statistics_sidebar():
-    """Create statistics sidebar"""
+    """Create statistics sidebar with layer information"""
     with st.sidebar:
         st.markdown("## 📊 Inventory Statistics")
         
         total_items = len(st.session_state.inventory_data)
         st.metric("Total Items", total_items)
         
-        # Items by shelf
-        st.markdown("### Items by Shelf")
-        for shelf in SHELF_STRUCTURE.keys():
+        if total_items == 0:
+            st.info("Upload an Excel file to see statistics")
+            return
+        
+        # Items by shelf and layer
+        st.markdown("### Items by Shelf & Layer")
+        for shelf in ['A', 'B', 'C', 'D', 'E']:
             shelf_items = len(st.session_state.inventory_data[
                 st.session_state.inventory_data['Location'].str.startswith(shelf)
             ])
             st.metric(f"Shelf {shelf}", shelf_items)
-        
-        # Items with images
-        items_with_images = len(st.session_state.inventory_data[
-            st.session_state.inventory_data['Image_URL'].notna() & 
-            (st.session_state.inventory_data['Image_URL'] != '')
-        ])
-        st.metric("Items with Images", items_with_images)
-        
-        # Items by status (based on remarks)
-        functional_items = len(st.session_state.inventory_data[
-            st.session_state.inventory_data['Remark'].str.contains('Functional', na=False)
-        ])
-        st.metric("Functional Items", functional_items)
-        
-        # Download data
-        st.markdown("### 💾 Export Data")
-        csv = st.session_state.inventory_data.to_csv(index=False)
-        st.download_button(
-            label="Download CSV",
-            data=csv,
-            file_name=f"inventory_data_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
-
-# Main app
-def main():
-    create_statistics_sidebar()
-    create_shelf_visualization()
-    create_inventory_editor()
-    create_image_gallery()
-
-if __name__ == "__main__":
-    main()
+            
+            # Show layer breakdown
+            if shelf in ['A', 'B']:
+                layers = [1, 2, 3]
+            elif shelf in ['C', 'D']:
+                layers = [1, 2, 3, 4]
+            else:  # E
+                layers = [4]
+            
+            layer_text = ""
+            for layer in sorted(layers, reverse=True):  # Top to bottom
+                layer_count = len(st.session_state.inventory_data[
+                    st.session_state.inventory_data['Location'] == f"{shelf}{layer}"
+                ])
+                position = "Top" if layer == 4 else "Upper" if layer == 3 else "Lower" if layer == 2 else "Bottom"
+                layer_text += f"
