@@ -4,7 +4,6 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 import requests
 from io import BytesIO
-from utility import check_password
 import xlsxwriter
 
 # Configure page
@@ -13,10 +12,6 @@ st.set_page_config(
     page_icon="📦",
     layout="wide"
 )
-
-# Check password before proceeding
-if not check_password():
-    st.stop()
 
 # GitHub image URLs
 SAMPLE_ROOM_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/Sampleroom.png"
@@ -82,17 +77,8 @@ SHELF_STRUCTURE = {
 }
 
 def create_header():
-    """Create header with logout option"""
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("## 📦 Inventory Management System")
-    with col2:
-        if st.button("🚪 Logout", key="logout_btn"):
-            # Clear password session state
-            for key in ['password_correct', 'password']:
-                if key in st.session_state:
-                    del st.session_state[key]
-            st.rerun()
+    """Create header"""
+    st.markdown("## 📦 Inventory Management System")
 
 def create_file_management():
     """Create file upload and download section"""
@@ -455,4 +441,32 @@ def create_statistics_sidebar():
                     st.session_state.inventory_data['Location'] == f"{shelf}{layer}"
                 ])
                 position = "Top" if layer == 4 else "Upper" if layer == 3 else "Lower" if layer == 2 else "Bottom"
-                layer_text += f"
+                layer_text += f"  • L{layer} ({position}): {layer_count}\n"
+            
+            if layer_text:
+                st.text(layer_text.strip())
+        
+        # Items with images
+        items_with_images = len(st.session_state.inventory_data[
+            st.session_state.inventory_data['Image_URL'].notna() & 
+            (st.session_state.inventory_data['Image_URL'] != '')
+        ])
+        st.metric("Items with Images", items_with_images)
+        
+        # Items by status
+        functional_items = len(st.session_state.inventory_data[
+            st.session_state.inventory_data['Remark'].str.contains('Functional', na=False)
+        ])
+        st.metric("Functional Items", functional_items)
+
+# Main app
+def main():
+    create_header()
+    create_statistics_sidebar()
+    create_file_management()
+    create_shelf_visualization()
+    create_inventory_editor()
+    create_image_gallery()
+
+if __name__ == "__main__":
+    main()
