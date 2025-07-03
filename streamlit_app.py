@@ -205,7 +205,6 @@ def create_file_management():
                 help="Download an empty template to fill with your inventory data"
             )
 
-
 def create_shelf_visualization():
     """Create interactive shelf visualization with resized sample room layout image"""
     # Room layout image from GitHub - resized to 1/3 width and height
