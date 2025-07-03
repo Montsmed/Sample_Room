@@ -317,7 +317,7 @@ def create_inventory_editor():
     location_data = clean_dataframe_types(location_data)
     location_data = location_data.reset_index(drop=True)
     
-    # Configure grid options - Remove the extra Select column
+    # Configure grid options - Location column is now editable
     gb = GridOptionsBuilder.from_dataframe(location_data)
     gb.configure_default_column(
         editable=True,
@@ -325,7 +325,6 @@ def create_inventory_editor():
         sortable=True,
         filter=True
     )
-    gb.configure_column('Location', editable=False)
     gb.configure_column('Image_URL', width=200)
     
     # Configure selection - use only built-in row selection
@@ -363,8 +362,8 @@ def create_inventory_editor():
         combined_data = pd.concat([remaining_data, edited_data], ignore_index=True)
         st.session_state.inventory_data = clean_dataframe_types(combined_data)
     
-    # Action buttons
-    col1, col2, col3, col4 = st.columns(4)
+    # Action buttons - Reduced to 3 columns
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         if st.button("➕ Add New Item", key=f"add_{location}"):
@@ -431,15 +430,7 @@ def create_inventory_editor():
     with col3:
         if st.button("💾 Save Changes", key=f"save_{location}"):
             st.success("Changes saved successfully!")
-    
-    with col4:
-        if st.button("🔄 Clear Location", key=f"clear_{location}"):
-            if st.button("⚠️ Confirm Clear All", key=f"confirm_clear_{location}"):
-                # Remove all items from this location
-                mask = st.session_state.inventory_data['Location'] == location
-                st.session_state.inventory_data = st.session_state.inventory_data[~mask]
-                st.success(f"Cleared all items from location {location}")
-                st.rerun()
+
 
 def create_image_gallery():
     """Create simplified image gallery showing only description and units"""
