@@ -193,7 +193,7 @@ def create_file_management():
             )
 
 def create_shelf_visualization():
-    """Create interactive shelf visualization in 5x4 grid with layer 1 at bottom"""
+    """Create interactive shelf visualization in 5x4 grid with same layers on same horizontal level"""
     # Room layout image from GitHub
     st.markdown("### 🏠 Sample Room Layout")
     try:
@@ -210,52 +210,41 @@ def create_shelf_visualization():
     
     st.markdown("Click on any shelf location to view and edit inventory items:")
     
-    # Define shelf letters and max layers
+    # Define shelf letters
     SHELF_LETTERS = ['A', 'B', 'C', 'D', 'E']
-    MAX_LAYERS = 4
     
-    # Create a 5x4 grid data structure for buttons
-    shelf_layers_grid = []
-    for layer in range(MAX_LAYERS, 0, -1):  # from top (4) to bottom (1)
-        row = []
-        for shelf in SHELF_LETTERS:
-            if shelf in ['A', 'B']:
-                valid_layers = [1, 2, 3]
-            elif shelf in ['C', 'D']:
-                valid_layers = [1, 2, 3, 4]
-            elif shelf == 'E':
-                valid_layers = [4]
-            else:
-                valid_layers = []
-            
-            if layer in valid_layers:
-                row.append(f"{shelf}{layer}")
-            else:
-                row.append(None)
-        shelf_layers_grid.append(row)
-    
-    # Display the grid with buttons
-    cols = st.columns(5)
-    
-    for row in shelf_layers_grid:
-        for i, location in enumerate(row):
+    # Create 4 rows for layers 4, 3, 2, 1 (top to bottom)
+    for layer in [4, 3, 2, 1]:
+        cols = st.columns(5)
+        
+        for i, shelf in enumerate(SHELF_LETTERS):
             with cols[i]:
-                if location is not None:
+                # Define valid layers for each shelf
+                if shelf in ['A', 'B']:
+                    valid_layers = [1, 2, 3]
+                elif shelf in ['C', 'D']:
+                    valid_layers = [1, 2, 3, 4]
+                elif shelf == 'E':
+                    valid_layers = [4]
+                else:
+                    valid_layers = []
+                
+                if layer in valid_layers:
+                    location = f"{shelf}{layer}"
                     item_count = len(st.session_state.inventory_data[
                         st.session_state.inventory_data['Location'] == location
                     ])
                     
-                    # Add visual indicators for layer position
-                    layer_num = int(location[-1])
-                    layer_indicator = "🔝" if layer_num == 4 else "🔼" if layer_num == 3 else "🔽" if layer_num == 2 else "🔻"
-                    button_text = f"{layer_indicator} {location}\n({item_count} items)"
+                    # Simple button text without visual indicators
+                    button_text = f"{location}\n({item_count} items)"
                     
-                    # Use same button type for all buttons
-                    if st.button(button_text, key=f"btn_{location}", type="primary"):
+                    # Use secondary button type (blue)
+                    if st.button(button_text, key=f"btn_{location}", type="secondary"):
                         st.session_state.selected_location = location
                         st.rerun()
                 else:
-                    st.write("")  # Empty space for missing layers
+                    # Empty space for shelves that don't have this layer
+                    st.write("")
 
 def create_inventory_editor():
     """Create inventory editor for selected location with improved delete functionality"""
@@ -300,12 +289,9 @@ def create_inventory_editor():
     
     # Clean data types before displaying
     location_data = clean_dataframe_types(location_data)
-    
-    # Add row index for deletion
     location_data = location_data.reset_index(drop=True)
-    location_data.insert(0, 'Select', False)
     
-    # Configure grid options
+    # Configure grid options - Remove the extra Select column
     gb = GridOptionsBuilder.from_dataframe(location_data)
     gb.configure_default_column(
         editable=True,
@@ -313,10 +299,16 @@ def create_inventory_editor():
         sortable=True,
         filter=True
     )
-    gb.configure_column('Select', editable=True, checkboxSelection=True, headerCheckboxSelection=True)
     gb.configure_column('Location', editable=False)
     gb.configure_column('Image_URL', width=200)
-    gb.configure_selection(selection_mode="multiple", use_checkbox=True)
+    
+    # Configure selection - use only built-in row selection
+    gb.configure_selection(
+        selection_mode="multiple", 
+        use_checkbox=True,
+        rowMultiSelectWithClick=True,
+        suppressRowDeselection=False
+    )
     gb.configure_pagination(enabled=True, paginationPageSize=10)
     
     grid_options = gb.build()
@@ -331,12 +323,13 @@ def create_inventory_editor():
         update_mode=GridUpdateMode.MODEL_CHANGED,
         fit_columns_on_grid_load=True,
         allow_unsafe_jscode=True,
-        key=f"grid_{location}"
+        key=f"grid_{location}",
+        enable_enterprise_modules=False
     )
     
     # Update session state with edited data
     if grid_response['data'] is not None:
-        edited_data = grid_response['data'].drop('Select', axis=1)
+        edited_data = grid_response['data']
         edited_data = clean_dataframe_types(edited_data)
         # Update the main dataframe
         mask = st.session_state.inventory_data['Location'] == location
@@ -365,47 +358,49 @@ def create_inventory_editor():
     
     with col2:
         if st.button("🗑️ Delete Selected", key=f"delete_{location}"):
-            # Improved delete function
+            # Improved delete function using selected_rows
             if grid_response['selected_rows'] is not None and len(grid_response['selected_rows']) > 0:
-                # Get the indices of selected rows from the grid
-                selected_data = pd.DataFrame(grid_response['selected_rows'])
+                selected_rows_df = pd.DataFrame(grid_response['selected_rows'])
                 
-                # Get current location data without the Select column
+                # Get current location data
                 current_location_data = st.session_state.inventory_data[
                     st.session_state.inventory_data['Location'] == location
                 ].copy()
                 
-                # Create a list of items to keep (not selected for deletion)
-                items_to_keep = []
-                for idx, row in current_location_data.iterrows():
-                    # Check if this row matches any selected row
+                # Create a list to track which rows to keep
+                rows_to_keep = []
+                
+                for idx, current_row in current_location_data.iterrows():
+                    # Check if this row is in the selected rows
                     is_selected = False
-                    for _, selected_row in selected_data.iterrows():
-                        if (row['Description'] == selected_row['Description'] and 
-                            row['Model'] == selected_row['Model'] and 
-                            row['SN/Lot'] == selected_row['SN/Lot']):
+                    for _, selected_row in selected_rows_df.iterrows():
+                        # Compare key fields to identify the row
+                        if (str(current_row['Description']) == str(selected_row['Description']) and 
+                            str(current_row['Model']) == str(selected_row['Model']) and 
+                            str(current_row['SN/Lot']) == str(selected_row['SN/Lot']) and
+                            int(current_row['Unit']) == int(selected_row['Unit'])):
                             is_selected = True
                             break
                     
                     if not is_selected:
-                        items_to_keep.append(row)
+                        rows_to_keep.append(current_row)
                 
                 # Update the main dataframe
                 mask = st.session_state.inventory_data['Location'] == location
                 other_data = st.session_state.inventory_data[~mask]
                 
-                if items_to_keep:
-                    remaining_location_data = pd.DataFrame(items_to_keep)
+                if rows_to_keep:
+                    remaining_location_data = pd.DataFrame(rows_to_keep)
                     st.session_state.inventory_data = pd.concat([other_data, remaining_location_data], ignore_index=True)
                 else:
                     st.session_state.inventory_data = other_data
                 
                 st.session_state.inventory_data = clean_dataframe_types(st.session_state.inventory_data)
                 
-                st.success(f"Deleted {len(selected_data)} item(s)")
+                st.success(f"Deleted {len(selected_rows_df)} item(s)")
                 st.rerun()
             else:
-                st.warning("Please select rows to delete")
+                st.warning("Please select rows to delete by clicking the checkboxes")
     
     with col3:
         if st.button("💾 Save Changes", key=f"save_{location}"):
