@@ -95,15 +95,6 @@ if 'inventory_data' not in st.session_state:
 if 'selected_location' not in st.session_state:
     st.session_state.selected_location = None
 
-# Define shelf structure with layers ordered from top to bottom (4 to 1)
-SHELF_STRUCTURE = {
-    'A': [3, 2, 1],  # Top to bottom
-    'B': [3, 2, 1],  # Top to bottom
-    'C': [4, 3, 2, 1],  # Top to bottom
-    'D': [4, 3, 2, 1],  # Top to bottom
-    'E': [4]  # Only top layer
-}
-
 def create_header():
     """Create header"""
     st.markdown("## 📦 Inventory Management System")
@@ -202,7 +193,7 @@ def create_file_management():
             )
 
 def create_shelf_visualization():
-    """Create interactive shelf visualization with proper layer ordering"""
+    """Create interactive shelf visualization in 5x4 grid with layer 1 at bottom"""
     # Room layout image from GitHub
     st.markdown("### 🏠 Sample Room Layout")
     try:
@@ -210,7 +201,7 @@ def create_shelf_visualization():
     except:
         st.error("Could not load sample room image from GitHub")
     
-    st.markdown("### 🗄️ Shelf Layout")
+    st.markdown("### 🗄️ Shelf Layout (5×4 Grid)")
     st.markdown("**Layer arrangement: 4 (Top) → 3 → 2 → 1 (Bottom)**")
     
     if len(st.session_state.inventory_data) == 0:
@@ -219,37 +210,55 @@ def create_shelf_visualization():
     
     st.markdown("Click on any shelf location to view and edit inventory items:")
     
-    # Create shelf visualization with buttons (top to bottom layout)
+    # Define shelf letters and max layers
+    SHELF_LETTERS = ['A', 'B', 'C', 'D', 'E']
+    MAX_LAYERS = 4
+    
+    # Create a 5x4 grid data structure for buttons
+    shelf_layers_grid = []
+    for layer in range(MAX_LAYERS, 0, -1):  # from top (4) to bottom (1)
+        row = []
+        for shelf in SHELF_LETTERS:
+            if shelf in ['A', 'B']:
+                valid_layers = [1, 2, 3]
+            elif shelf in ['C', 'D']:
+                valid_layers = [1, 2, 3, 4]
+            elif shelf == 'E':
+                valid_layers = [4]
+            else:
+                valid_layers = []
+            
+            if layer in valid_layers:
+                row.append(f"{shelf}{layer}")
+            else:
+                row.append(None)
+        shelf_layers_grid.append(row)
+    
+    # Display the grid with buttons
     cols = st.columns(5)
     
-    for i, (shelf, layers) in enumerate(SHELF_STRUCTURE.items()):
-        with cols[i]:
-            st.markdown(f"**Shelf {shelf}**")
-            # Display layers from top to bottom
-            for layer in layers:
-                location = f"{shelf}{layer}"
-                item_count = len(st.session_state.inventory_data[
-                    st.session_state.inventory_data['Location'] == location
-                ])
-                
-                # Add visual indicators for layer position
-                layer_indicator = "🔝" if layer == 4 else "🔼" if layer == 3 else "🔽" if layer == 2 else "🔻"
-                button_text = f"{layer_indicator} {location} ({item_count} items)"
-                
-                # Color coding based on layer - Fixed button type issue
-                if layer == 4:
-                    button_type = "primary"
-                elif layer == 3:
-                    button_type = "secondary"
+    for row in shelf_layers_grid:
+        for i, location in enumerate(row):
+            with cols[i]:
+                if location is not None:
+                    item_count = len(st.session_state.inventory_data[
+                        st.session_state.inventory_data['Location'] == location
+                    ])
+                    
+                    # Add visual indicators for layer position
+                    layer_num = int(location[-1])
+                    layer_indicator = "🔝" if layer_num == 4 else "🔼" if layer_num == 3 else "🔽" if layer_num == 2 else "🔻"
+                    button_text = f"{layer_indicator} {location}\n({item_count} items)"
+                    
+                    # Use same button type for all buttons
+                    if st.button(button_text, key=f"btn_{location}", type="primary"):
+                        st.session_state.selected_location = location
+                        st.rerun()
                 else:
-                    button_type = "tertiary"  # Changed from None to "tertiary"
-                
-                if st.button(button_text, key=f"btn_{location}", type=button_type):
-                    st.session_state.selected_location = location
-                    st.rerun()
+                    st.write("")  # Empty space for missing layers
 
 def create_inventory_editor():
-    """Create inventory editor for selected location with delete functionality"""
+    """Create inventory editor for selected location with improved delete functionality"""
     if len(st.session_state.inventory_data) == 0:
         st.info("📤 Please upload an Excel file first to start managing your inventory.")
         return
@@ -356,23 +365,44 @@ def create_inventory_editor():
     
     with col2:
         if st.button("🗑️ Delete Selected", key=f"delete_{location}"):
+            # Improved delete function
             if grid_response['selected_rows'] is not None and len(grid_response['selected_rows']) > 0:
-                selected_indices = [row['_selectedRowNodeInfo']['nodeRowIndex'] for row in grid_response['selected_rows']]
-                # Get the original data without the Select column
+                # Get the indices of selected rows from the grid
+                selected_data = pd.DataFrame(grid_response['selected_rows'])
+                
+                # Get current location data without the Select column
                 current_location_data = st.session_state.inventory_data[
                     st.session_state.inventory_data['Location'] == location
-                ].reset_index(drop=True)
+                ].copy()
                 
-                # Remove selected rows
-                remaining_data = current_location_data.drop(selected_indices).reset_index(drop=True)
+                # Create a list of items to keep (not selected for deletion)
+                items_to_keep = []
+                for idx, row in current_location_data.iterrows():
+                    # Check if this row matches any selected row
+                    is_selected = False
+                    for _, selected_row in selected_data.iterrows():
+                        if (row['Description'] == selected_row['Description'] and 
+                            row['Model'] == selected_row['Model'] and 
+                            row['SN/Lot'] == selected_row['SN/Lot']):
+                            is_selected = True
+                            break
+                    
+                    if not is_selected:
+                        items_to_keep.append(row)
                 
-                # Update main dataframe
+                # Update the main dataframe
                 mask = st.session_state.inventory_data['Location'] == location
                 other_data = st.session_state.inventory_data[~mask]
-                combined_data = pd.concat([other_data, remaining_data], ignore_index=True)
-                st.session_state.inventory_data = clean_dataframe_types(combined_data)
                 
-                st.success(f"Deleted {len(selected_indices)} item(s)")
+                if items_to_keep:
+                    remaining_location_data = pd.DataFrame(items_to_keep)
+                    st.session_state.inventory_data = pd.concat([other_data, remaining_location_data], ignore_index=True)
+                else:
+                    st.session_state.inventory_data = other_data
+                
+                st.session_state.inventory_data = clean_dataframe_types(st.session_state.inventory_data)
+                
+                st.success(f"Deleted {len(selected_data)} item(s)")
                 st.rerun()
             else:
                 st.warning("Please select rows to delete")
@@ -391,7 +421,7 @@ def create_inventory_editor():
                 st.rerun()
 
 def create_image_gallery():
-    """Create image gallery for selected location using GitHub placeholder"""
+    """Create simplified image gallery showing only description and units"""
     if len(st.session_state.inventory_data) == 0 or st.session_state.selected_location is None:
         return
     
@@ -423,23 +453,22 @@ def create_image_gallery():
                         if item['Image_URL'] and str(item['Image_URL']).strip() and str(item['Image_URL']) != 'nan':
                             st.image(
                                 item['Image_URL'],
-                                caption=f"{item['Description']}\nModel: {item['Model']}\nSN/Lot: {item['SN/Lot']}",
                                 use_container_width=True
                             )
                         else:
-                            # Use GitHub placeholder image
                             st.image(
                                 PLACEHOLDER_IMAGE,
-                                caption=f"{item['Description']}\nModel: {item['Model']}\nSN/Lot: {item['SN/Lot']}",
                                 use_container_width=True
                             )
                     except:
-                        # Fallback to GitHub placeholder
                         st.image(
                             PLACEHOLDER_IMAGE,
-                            caption=f"{item['Description']}\nModel: {item['Model']}\nSN/Lot: {item['SN/Lot']}",
                             use_container_width=True
                         )
+                    
+                    # Show only description and unit count
+                    st.markdown(f"**{item['Description']}**")
+                    st.markdown(f"Units: {item['Unit']}")
 
 def create_statistics_sidebar():
     """Create statistics sidebar with layer information"""
