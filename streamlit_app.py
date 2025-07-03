@@ -5,6 +5,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 import requests
 from io import BytesIO
 import xlsxwriter
+import re
 
 # Configure page
 st.set_page_config(
@@ -99,8 +100,38 @@ def create_header():
     """Create header"""
     st.markdown("## 📦 Inventory Management System")
 
+def create_search_bar():
+    """Create search functionality for inventory items"""
+    st.markdown("## 🔍 Search Inventory Items")
+    
+    if len(st.session_state.inventory_data) == 0:
+        st.info("Upload an Excel file first to enable search functionality.")
+        return
+    
+    search_query = st.text_input(
+        "Enter search term (description, SN/Lot, model):",
+        placeholder="Type to search items..."
+    )
+    
+    if search_query:
+        # Case-insensitive partial match in Description, SN/Lot, or Model
+        pattern = re.compile(re.escape(search_query), re.IGNORECASE)
+        filtered_data = st.session_state.inventory_data[
+            st.session_state.inventory_data['Description'].str.contains(pattern, na=False) |
+            st.session_state.inventory_data['SN/Lot'].str.contains(pattern, na=False) |
+            st.session_state.inventory_data['Model'].str.contains(pattern, na=False)
+        ]
+        
+        if len(filtered_data) > 0:
+            st.markdown(f"### 🎯 Search Results: {len(filtered_data)} item(s) found")
+            st.dataframe(filtered_data, use_container_width=True)
+        else:
+            st.warning(f"No items found matching '{search_query}'")
+    else:
+        st.info("Type in the search box to find items by description, SN/Lot, or model.")
+
 def create_file_management():
-    """Create file upload and download section"""
+    """Create file upload and download section - removed previews"""
     st.markdown("## 📁 File Management")
     
     # Show initial message if no data
@@ -134,7 +165,6 @@ def create_file_management():
                     st.info("Please ensure your Excel file has these columns: Location, Description, Unit, Model, SN/Lot, Remark, Image_URL")
                 else:
                     st.success("✅ File uploaded successfully!")
-                    st.dataframe(new_data.head())
                     
                     col_a, col_b = st.columns(2)
                     with col_a:
@@ -173,10 +203,6 @@ def create_file_management():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 help="Download the current inventory data as an Excel file"
             )
-            
-            # Show data preview
-            st.markdown("**Current Data Preview:**")
-            st.dataframe(st.session_state.inventory_data.head())
         else:
             st.info("No data available to download. Please upload an Excel file first.")
             
@@ -193,11 +219,11 @@ def create_file_management():
             )
 
 def create_shelf_visualization():
-    """Create interactive shelf visualization in 5x4 grid with same layers on same horizontal level"""
-    # Room layout image from GitHub
+    """Create interactive shelf visualization with resized sample room layout image"""
+    # Room layout image from GitHub - resized to 1/3 width and height
     st.markdown("### 🏠 Sample Room Layout")
     try:
-        st.image(SAMPLE_ROOM_IMAGE, caption="Sample Room Layout", use_container_width=True)
+        st.image(SAMPLE_ROOM_IMAGE, caption="Sample Room Layout", width=400)
     except:
         st.error("Could not load sample room image from GitHub")
     
@@ -523,6 +549,7 @@ def main():
     create_header()
     create_statistics_sidebar()
     create_file_management()
+    create_search_bar()
     create_shelf_visualization()
     create_inventory_editor()
     create_image_gallery()
