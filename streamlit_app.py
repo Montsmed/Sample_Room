@@ -6,6 +6,8 @@ import requests
 from io import BytesIO
 import xlsxwriter
 import re
+import base64
+import json
 
 # Configure page
 st.set_page_config(
@@ -14,10 +16,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# GitHub URLs
+# GitHub URLs and Configuration
 SAMPLE_ROOM_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/Sampleroom.png"
 PLACEHOLDER_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/No_Image.jpg"
-EXCEL_FILE_URL = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/inventory_data.xlsx"  # Replace with your actual Excel file URL
+EXCEL_FILE_URL = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/inventory_data.xlsx"
+
+# GitHub API Configuration - Add these to your Streamlit secrets
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")  # Your GitHub Personal Access Token
+GITHUB_REPO = "Montsmed/Sample_Room"  # Your repository
+EXCEL_FILE_PATH = "inventory_data.xlsx"  # Path to Excel file in repo
 
 # Load data from GitHub Excel file
 @st.cache_data
@@ -105,15 +112,68 @@ def convert_df_to_excel(df):
     processed_data = output.getvalue()
     return processed_data
 
+def save_to_github(df):
+    """Save dataframe to GitHub repository as Excel file"""
+    if not GITHUB_TOKEN:
+        st.error("GitHub token not configured. Please add GITHUB_TOKEN to your Streamlit secrets.")
+        return False
+    
+    try:
+        # Convert dataframe to Excel bytes
+        excel_data = convert_df_to_excel(df)
+        
+        # Encode to base64 for GitHub API
+        excel_b64 = base64.b64encode(excel_data).decode('utf-8')
+        
+        # Get current file SHA (required for updating)
+        get_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{EXCEL_FILE_PATH}"
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        get_response = requests.get(get_url, headers=headers)
+        
+        # Prepare commit data
+        commit_data = {
+            'message': f'Update inventory data - {pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")}',
+            'content': excel_b64,
+            'branch': 'main'  # or your default branch
+        }
+        
+        # If file exists, add SHA for update
+        if get_response.status_code == 200:
+            current_file = get_response.json()
+            commit_data['sha'] = current_file['sha']
+        
+        # Update/create file
+        put_response = requests.put(get_url, headers=headers, json=commit_data)
+        
+        if put_response.status_code in [200, 201]:
+            return True
+        else:
+            st.error(f"Failed to save to GitHub: {put_response.status_code} - {put_response.text}")
+            return False
+            
+    except Exception as e:
+        st.error(f"Error saving to GitHub: {e}")
+        return False
+
 # Initialize session state
 if 'inventory_data' not in st.session_state:
     st.session_state.inventory_data = load_inventory_data()
 if 'selected_location' not in st.session_state:
     st.session_state.selected_location = None
+if 'data_changed' not in st.session_state:
+    st.session_state.data_changed = False
 
 def create_header():
     """Create header"""
     st.markdown("## 📦 Inventory Management System")
+    
+    # Show save status
+    if st.session_state.data_changed:
+        st.warning("⚠️ You have unsaved changes!")
 
 def create_search_bar():
     """Create search functionality for inventory items"""
@@ -146,7 +206,7 @@ def create_search_bar():
         st.info("Type in the search box to find items by description, SN/Lot, or model.")
 
 def create_file_management():
-    """Create download section only"""
+    """Create download section and global save functionality"""
     st.markdown("## 📁 File Management")
     
     # Show data status
@@ -155,55 +215,46 @@ def create_file_management():
     else:
         st.warning("⚠️ No inventory data available. Please check the GitHub file URL.")
     
-    # Download section
-    st.markdown("### 📥 Download Excel File")
+    # Global save and refresh buttons
+    col1, col2, col3 = st.columns(3)
     
-    if len(st.session_state.inventory_data) > 0:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("Download the current inventory data as an Excel file")
-            
+    with col1:
+        if st.button("💾 Save All Changes to GitHub", type="primary", help="Save all changes to the GitHub repository"):
+            if GITHUB_TOKEN:
+                with st.spinner("Saving to GitHub..."):
+                    if save_to_github(st.session_state.inventory_data):
+                        st.success("✅ Successfully saved to GitHub!")
+                        st.session_state.data_changed = False
+                        # Clear cache to reload fresh data
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to save to GitHub. Please check your configuration.")
+            else:
+                st.error("GitHub token not configured. Please add GITHUB_TOKEN to your Streamlit secrets.")
+    
+    with col2:
+        if st.button("🔄 Refresh Data from GitHub", help="Reload data from the GitHub repository"):
+            st.cache_data.clear()
+            st.session_state.inventory_data = load_inventory_data()
+            st.session_state.data_changed = False
+            st.success("Data refreshed successfully!")
+            st.rerun()
+    
+    with col3:
+        # Download section
+        if len(st.session_state.inventory_data) > 0:
             # Convert dataframe to Excel
             excel_data = convert_df_to_excel(st.session_state.inventory_data)
             
             # Create download button
             st.download_button(
-                label="📥 Download Inventory Data",
+                label="📥 Download Excel",
                 data=excel_data,
                 file_name=f"inventory_data_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 help="Download the current inventory data as an Excel file"
             )
-        
-        with col2:
-            # Refresh data button
-            if st.button("🔄 Refresh Data from GitHub", help="Reload data from the GitHub repository"):
-                st.session_state.inventory_data = load_inventory_data()
-                st.success("Data refreshed successfully!")
-                st.rerun()
-    else:
-        st.info("No data available to download.")
-        
-        # Provide template download
-        template_data = pd.DataFrame({
-            'Location': pd.Series([], dtype='string'),
-            'Description': pd.Series([], dtype='string'),
-            'Unit': pd.Series([], dtype='int64'),
-            'Model': pd.Series([], dtype='string'),
-            'SN/Lot': pd.Series([], dtype='string'),
-            'Remark': pd.Series([], dtype='string'),
-            'Image_URL': pd.Series([], dtype='string')
-        })
-        template_excel = convert_df_to_excel(template_data)
-        
-        st.download_button(
-            label="📋 Download Template",
-            data=template_excel,
-            file_name="inventory_template.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            help="Download an empty template to fill with your inventory data"
-        )
 
 def create_shelf_visualization():
     """Create interactive shelf visualization with resized sample room layout image"""
@@ -260,7 +311,7 @@ def create_shelf_visualization():
                     st.write("")
 
 def create_inventory_editor():
-    """Create inventory editor for selected location with improved delete functionality"""
+    """Create inventory editor for selected location with GitHub save integration"""
     if len(st.session_state.inventory_data) == 0:
         st.info("📊 No inventory data available. Please check the GitHub file URL.")
         return
@@ -297,6 +348,7 @@ def create_inventory_editor():
             new_row = clean_dataframe_types(new_row)
             combined_data = pd.concat([st.session_state.inventory_data, new_row], ignore_index=True)
             st.session_state.inventory_data = clean_dataframe_types(combined_data)
+            st.session_state.data_changed = True
             st.rerun()
         return
     
@@ -348,9 +400,10 @@ def create_inventory_editor():
         remaining_data = st.session_state.inventory_data[~mask]
         combined_data = pd.concat([remaining_data, edited_data], ignore_index=True)
         st.session_state.inventory_data = clean_dataframe_types(combined_data)
+        st.session_state.data_changed = True
     
-    # Action buttons - Reduced to 3 columns
-    col1, col2, col3 = st.columns(3)
+    # Action buttons
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         if st.button("➕ Add New Item", key=f"add_{location}"):
@@ -366,6 +419,7 @@ def create_inventory_editor():
             new_row = clean_dataframe_types(new_row)
             combined_data = pd.concat([st.session_state.inventory_data, new_row], ignore_index=True)
             st.session_state.inventory_data = clean_dataframe_types(combined_data)
+            st.session_state.data_changed = True
             st.rerun()
     
     with col2:
@@ -408,6 +462,7 @@ def create_inventory_editor():
                     st.session_state.inventory_data = other_data
                 
                 st.session_state.inventory_data = clean_dataframe_types(st.session_state.inventory_data)
+                st.session_state.data_changed = True
                 
                 st.success(f"Deleted {len(selected_rows_df)} item(s)")
                 st.rerun()
@@ -415,8 +470,26 @@ def create_inventory_editor():
                 st.warning("Please select rows to delete by clicking the checkboxes")
     
     with col3:
-        if st.button("💾 Save Changes", key=f"save_{location}"):
-            st.success("Changes saved successfully!")
+        if st.button("💾 Save to GitHub", key=f"save_{location}", type="primary"):
+            if GITHUB_TOKEN:
+                with st.spinner("Saving to GitHub..."):
+                    if save_to_github(st.session_state.inventory_data):
+                        st.success("✅ Successfully saved to GitHub!")
+                        st.session_state.data_changed = False
+                        # Clear cache to reload fresh data
+                        st.cache_data.clear()
+                    else:
+                        st.error("❌ Failed to save to GitHub. Please check your configuration.")
+            else:
+                st.error("GitHub token not configured. Please add GITHUB_TOKEN to your Streamlit secrets.")
+    
+    with col4:
+        if st.button("🔄 Refresh", key=f"refresh_{location}"):
+            st.cache_data.clear()
+            st.session_state.inventory_data = load_inventory_data()
+            st.session_state.data_changed = False
+            st.success("Data refreshed!")
+            st.rerun()
 
 def create_image_gallery():
     """Create simplified image gallery showing only description and units"""
@@ -475,6 +548,12 @@ def create_statistics_sidebar():
         
         total_items = len(st.session_state.inventory_data)
         st.metric("Total Items", total_items)
+        
+        # Show unsaved changes indicator
+        if st.session_state.data_changed:
+            st.warning("⚠️ Unsaved changes")
+        else:
+            st.success("✅ All changes saved")
         
         if total_items == 0:
             st.info("No inventory data available")
