@@ -8,6 +8,9 @@ import xlsxwriter
 import re
 import base64
 import json
+import time
+import threading
+from datetime import datetime
 
 # Configure page
 st.set_page_config(
@@ -21,30 +24,30 @@ SAMPLE_ROOM_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main
 PLACEHOLDER_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/No_Image.jpg"
 EXCEL_FILE_URL = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/inventory_data.xlsx"
 
-# GitHub API Configuration - Add these to your Streamlit secrets
-GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")  # Your GitHub Personal Access Token
-GITHUB_REPO = "Montsmed/Sample_Room"  # Your repository
-EXCEL_FILE_PATH = "inventory_data.xlsx"  # Path to Excel file in repo
+# GitHub API Configuration
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+GITHUB_REPO = "Montsmed/Sample_Room"
+EXCEL_FILE_PATH = "inventory_data.xlsx"
+
+# Auto-save configuration
+AUTO_SAVE_DELAY = 2  # seconds to wait before auto-saving after last change
+MAX_SAVE_ATTEMPTS = 3  # maximum retry attempts for failed saves
 
 # Load data from GitHub Excel file
 @st.cache_data
 def load_inventory_data():
     """Load inventory data from GitHub Excel file"""
     try:
-        # Download Excel file from GitHub
         response = requests.get(EXCEL_FILE_URL)
         response.raise_for_status()
         
-        # Read Excel file from bytes
         excel_data = BytesIO(response.content)
         df = pd.read_excel(excel_data)
         
-        # Clean and standardize data types
         return clean_dataframe_types(df)
         
     except Exception as e:
         st.error(f"Error loading data from GitHub: {e}")
-        # Return empty dataframe with correct structure if loading fails
         return pd.DataFrame({
             'Location': pd.Series([], dtype='string'),
             'Description': pd.Series([], dtype='string'),
@@ -59,7 +62,6 @@ def clean_dataframe_types(df):
     """Clean and standardize DataFrame column types for Arrow compatibility"""
     df_clean = df.copy()
     
-    # Convert all columns to appropriate types
     df_clean['Location'] = df_clean['Location'].astype('string')
     df_clean['Description'] = df_clean['Description'].astype('string')
     df_clean['Unit'] = pd.to_numeric(df_clean['Unit'], errors='coerce').fillna(0).astype('int64')
@@ -68,7 +70,6 @@ def clean_dataframe_types(df):
     df_clean['Remark'] = df_clean['Remark'].astype('string')
     df_clean['Image_URL'] = df_clean['Image_URL'].astype('string')
     
-    # Replace NaN values with empty strings for string columns
     string_columns = ['Location', 'Description', 'Model', 'SN/Lot', 'Remark', 'Image_URL']
     for col in string_columns:
         df_clean[col] = df_clean[col].fillna('')
@@ -76,16 +77,14 @@ def clean_dataframe_types(df):
     return df_clean
 
 def convert_df_to_excel(df):
-    """Convert dataframe to Excel format for download"""
+    """Convert dataframe to Excel format"""
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Inventory')
         
-        # Get the xlsxwriter workbook and worksheet objects
         workbook = writer.book
         worksheet = writer.sheets['Inventory']
         
-        # Add some formatting
         header_format = workbook.add_format({
             'bold': True,
             'text_wrap': True,
@@ -94,13 +93,11 @@ def convert_df_to_excel(df):
             'border': 1
         })
         
-        # Write the column headers with the defined format
         for col_num, value in enumerate(df.columns.values):
             worksheet.write(0, col_num, value, header_format)
         
-        # Auto-adjust column widths
         for i, col in enumerate(df.columns):
-            if len(df) > 0:  # Only if dataframe has data
+            if len(df) > 0:
                 max_length = max(
                     df[col].astype(str).map(len).max(),
                     len(str(col))
@@ -109,23 +106,17 @@ def convert_df_to_excel(df):
                 max_length = len(str(col)) + 2
             worksheet.set_column(i, i, min(max_length, 50))
     
-    processed_data = output.getvalue()
-    return processed_data
+    return output.getvalue()
 
-def save_to_github(df):
-    """Save dataframe to GitHub repository as Excel file"""
+def auto_save_to_github(df, attempt=1):
+    """Auto-save dataframe to GitHub repository with retry logic"""
     if not GITHUB_TOKEN:
-        st.error("GitHub token not configured. Please add GITHUB_TOKEN to your Streamlit secrets.")
-        return False
+        return False, "GitHub token not configured"
     
     try:
-        # Convert dataframe to Excel bytes
         excel_data = convert_df_to_excel(df)
-        
-        # Encode to base64 for GitHub API
         excel_b64 = base64.b64encode(excel_data).decode('utf-8')
         
-        # Get current file SHA (required for updating)
         get_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{EXCEL_FILE_PATH}"
         headers = {
             'Authorization': f'token {GITHUB_TOKEN}',
@@ -134,46 +125,90 @@ def save_to_github(df):
         
         get_response = requests.get(get_url, headers=headers)
         
-        # Prepare commit data
         commit_data = {
-            'message': f'Update inventory data - {pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")}',
+            'message': f'Auto-save inventory data - {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
             'content': excel_b64,
-            'branch': 'main'  # or your default branch
+            'branch': 'main'
         }
         
-        # If file exists, add SHA for update
         if get_response.status_code == 200:
             current_file = get_response.json()
             commit_data['sha'] = current_file['sha']
         
-        # Update/create file
         put_response = requests.put(get_url, headers=headers, json=commit_data)
         
         if put_response.status_code in [200, 201]:
-            return True
+            return True, "Successfully auto-saved to GitHub"
         else:
-            st.error(f"Failed to save to GitHub: {put_response.status_code} - {put_response.text}")
-            return False
+            if attempt < MAX_SAVE_ATTEMPTS:
+                time.sleep(1)  # Wait 1 second before retry
+                return auto_save_to_github(df, attempt + 1)
+            return False, f"Failed after {MAX_SAVE_ATTEMPTS} attempts: {put_response.status_code}"
             
     except Exception as e:
-        st.error(f"Error saving to GitHub: {e}")
-        return False
+        if attempt < MAX_SAVE_ATTEMPTS:
+            time.sleep(1)
+            return auto_save_to_github(df, attempt + 1)
+        return False, f"Error after {MAX_SAVE_ATTEMPTS} attempts: {str(e)}"
+
+def trigger_auto_save():
+    """Trigger auto-save after delay"""
+    if 'auto_save_timer' in st.session_state:
+        st.session_state.auto_save_timer = time.time()
+    else:
+        st.session_state.auto_save_timer = time.time()
+    
+    st.session_state.pending_save = True
+
+def check_and_execute_auto_save():
+    """Check if auto-save should be executed and do it"""
+    if (st.session_state.get('pending_save', False) and 
+        'auto_save_timer' in st.session_state and 
+        time.time() - st.session_state.auto_save_timer >= AUTO_SAVE_DELAY):
+        
+        st.session_state.pending_save = False
+        
+        # Show saving indicator
+        save_placeholder = st.empty()
+        save_placeholder.info("🔄 Auto-saving changes...")
+        
+        success, message = auto_save_to_github(st.session_state.inventory_data)
+        
+        if success:
+            save_placeholder.success("✅ Auto-saved successfully!")
+            st.session_state.last_save_time = datetime.now()
+            st.cache_data.clear()  # Clear cache to ensure fresh data on reload
+        else:
+            save_placeholder.error(f"❌ Auto-save failed: {message}")
+        
+        # Clear the message after 3 seconds
+        time.sleep(3)
+        save_placeholder.empty()
 
 # Initialize session state
 if 'inventory_data' not in st.session_state:
     st.session_state.inventory_data = load_inventory_data()
 if 'selected_location' not in st.session_state:
     st.session_state.selected_location = None
-if 'data_changed' not in st.session_state:
-    st.session_state.data_changed = False
+if 'pending_save' not in st.session_state:
+    st.session_state.pending_save = False
+if 'last_save_time' not in st.session_state:
+    st.session_state.last_save_time = None
 
 def create_header():
-    """Create header"""
-    st.markdown("## 📦 Inventory Management System")
+    """Create header with auto-save status"""
+    col1, col2 = st.columns([3, 1])
     
-    # Show save status
-    if st.session_state.data_changed:
-        st.warning("⚠️ You have unsaved changes!")
+    with col1:
+        st.markdown("## 📦 Inventory Management System")
+    
+    with col2:
+        if st.session_state.pending_save:
+            st.markdown("🟡 **Auto-saving...**")
+        elif st.session_state.last_save_time:
+            st.markdown(f"🟢 **Last saved:** {st.session_state.last_save_time.strftime('%H:%M:%S')}")
+        else:
+            st.markdown("🔵 **Auto-save enabled**")
 
 def create_search_bar():
     """Create search functionality for inventory items"""
@@ -189,7 +224,6 @@ def create_search_bar():
     )
     
     if search_query:
-        # Case-insensitive partial match in Description, SN/Lot, or Model
         pattern = re.compile(re.escape(search_query), re.IGNORECASE)
         filtered_data = st.session_state.inventory_data[
             st.session_state.inventory_data['Description'].str.contains(pattern, na=False) |
@@ -206,48 +240,42 @@ def create_search_bar():
         st.info("Type in the search box to find items by description, SN/Lot, or model.")
 
 def create_file_management():
-    """Create download section and global save functionality"""
+    """Create download section and manual save option"""
     st.markdown("## 📁 File Management")
     
-    # Show data status
     if len(st.session_state.inventory_data) > 0:
         st.success(f"✅ Inventory data loaded successfully! ({len(st.session_state.inventory_data)} items)")
     else:
         st.warning("⚠️ No inventory data available. Please check the GitHub file URL.")
     
-    # Global save and refresh buttons
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("💾 Save All Changes to GitHub", type="primary", help="Save all changes to the GitHub repository"):
+        if st.button("💾 Force Save Now", help="Manually trigger immediate save to GitHub"):
             if GITHUB_TOKEN:
                 with st.spinner("Saving to GitHub..."):
-                    if save_to_github(st.session_state.inventory_data):
+                    success, message = auto_save_to_github(st.session_state.inventory_data)
+                    if success:
                         st.success("✅ Successfully saved to GitHub!")
-                        st.session_state.data_changed = False
-                        # Clear cache to reload fresh data
+                        st.session_state.last_save_time = datetime.now()
+                        st.session_state.pending_save = False
                         st.cache_data.clear()
-                        st.rerun()
                     else:
-                        st.error("❌ Failed to save to GitHub. Please check your configuration.")
+                        st.error(f"❌ Failed to save: {message}")
             else:
-                st.error("GitHub token not configured. Please add GITHUB_TOKEN to your Streamlit secrets.")
+                st.error("GitHub token not configured.")
     
     with col2:
-        if st.button("🔄 Refresh Data from GitHub", help="Reload data from the GitHub repository"):
+        if st.button("🔄 Refresh Data", help="Reload data from GitHub repository"):
             st.cache_data.clear()
             st.session_state.inventory_data = load_inventory_data()
-            st.session_state.data_changed = False
+            st.session_state.pending_save = False
             st.success("Data refreshed successfully!")
             st.rerun()
     
     with col3:
-        # Download section
         if len(st.session_state.inventory_data) > 0:
-            # Convert dataframe to Excel
             excel_data = convert_df_to_excel(st.session_state.inventory_data)
-            
-            # Create download button
             st.download_button(
                 label="📥 Download Excel",
                 data=excel_data,
@@ -257,8 +285,7 @@ def create_file_management():
             )
 
 def create_shelf_visualization():
-    """Create interactive shelf visualization with resized sample room layout image"""
-    # Room layout image from GitHub - resized to 1/3 width and height
+    """Create interactive shelf visualization"""
     st.markdown("### 🏠 Sample Room Layout")
     try:
         st.image(SAMPLE_ROOM_IMAGE, caption="Sample Room Layout", width=400)
@@ -274,16 +301,13 @@ def create_shelf_visualization():
     
     st.markdown("Click on any shelf location to view and edit inventory items:")
     
-    # Define shelf letters
     SHELF_LETTERS = ['A', 'B', 'C', 'D', 'E']
     
-    # Create 4 rows for layers 4, 3, 2, 1 (top to bottom)
     for layer in [4, 3, 2, 1]:
         cols = st.columns(5)
         
         for i, shelf in enumerate(SHELF_LETTERS):
             with cols[i]:
-                # Define valid layers for each shelf
                 if shelf in ['A', 'B']:
                     valid_layers = [1, 2, 3]
                 elif shelf in ['C', 'D']:
@@ -299,19 +323,16 @@ def create_shelf_visualization():
                         st.session_state.inventory_data['Location'] == location
                     ])
                     
-                    # Simple button text without visual indicators
                     button_text = f"{location}\n({item_count} items)"
                     
-                    # Use secondary button type (blue)
                     if st.button(button_text, key=f"btn_{location}", type="secondary"):
                         st.session_state.selected_location = location
                         st.rerun()
                 else:
-                    # Empty space for shelves that don't have this layer
                     st.write("")
 
 def create_inventory_editor():
-    """Create inventory editor for selected location with GitHub save integration"""
+    """Create inventory editor with auto-save functionality"""
     if len(st.session_state.inventory_data) == 0:
         st.info("📊 No inventory data available. Please check the GitHub file URL.")
         return
@@ -325,8 +346,8 @@ def create_inventory_editor():
     layer_position = "Top" if layer_num == "4" else "Upper" if layer_num == "3" else "Lower" if layer_num == "2" else "Bottom"
     
     st.markdown(f"## 📝 Inventory Editor - Location {location} ({layer_position} Layer)")
+    st.markdown("*Changes are automatically saved to GitHub*")
     
-    # Filter data for selected location
     location_data = st.session_state.inventory_data[
         st.session_state.inventory_data['Location'] == location
     ].copy()
@@ -334,7 +355,6 @@ def create_inventory_editor():
     if location_data.empty:
         st.warning(f"No items found in location {location}")
         
-        # Allow adding new items
         if st.button("➕ Add New Item"):
             new_row = pd.DataFrame({
                 'Location': [location],
@@ -348,15 +368,13 @@ def create_inventory_editor():
             new_row = clean_dataframe_types(new_row)
             combined_data = pd.concat([st.session_state.inventory_data, new_row], ignore_index=True)
             st.session_state.inventory_data = clean_dataframe_types(combined_data)
-            st.session_state.data_changed = True
+            trigger_auto_save()
             st.rerun()
         return
     
-    # Clean data types before displaying
     location_data = clean_dataframe_types(location_data)
     location_data = location_data.reset_index(drop=True)
     
-    # Configure grid options - Location column is now editable
     gb = GridOptionsBuilder.from_dataframe(location_data)
     gb.configure_default_column(
         editable=True,
@@ -365,8 +383,6 @@ def create_inventory_editor():
         filter=True
     )
     gb.configure_column('Image_URL', width=200)
-    
-    # Configure selection - use only built-in row selection
     gb.configure_selection(
         selection_mode="multiple", 
         use_checkbox=True,
@@ -377,7 +393,6 @@ def create_inventory_editor():
     
     grid_options = gb.build()
     
-    # Display AgGrid
     grid_response = AgGrid(
         location_data,
         gridOptions=grid_options,
@@ -391,19 +406,24 @@ def create_inventory_editor():
         enable_enterprise_modules=False
     )
     
-    # Update session state with edited data
+    # Check for data changes and trigger auto-save
     if grid_response['data'] is not None:
         edited_data = grid_response['data']
         edited_data = clean_dataframe_types(edited_data)
-        # Update the main dataframe
-        mask = st.session_state.inventory_data['Location'] == location
-        remaining_data = st.session_state.inventory_data[~mask]
-        combined_data = pd.concat([remaining_data, edited_data], ignore_index=True)
-        st.session_state.inventory_data = clean_dataframe_types(combined_data)
-        st.session_state.data_changed = True
+        
+        # Check if data actually changed
+        original_data = st.session_state.inventory_data[
+            st.session_state.inventory_data['Location'] == location
+        ].reset_index(drop=True)
+        
+        if not edited_data.equals(original_data):
+            mask = st.session_state.inventory_data['Location'] == location
+            remaining_data = st.session_state.inventory_data[~mask]
+            combined_data = pd.concat([remaining_data, edited_data], ignore_index=True)
+            st.session_state.inventory_data = clean_dataframe_types(combined_data)
+            trigger_auto_save()
     
-    # Action buttons
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
     
     with col1:
         if st.button("➕ Add New Item", key=f"add_{location}"):
@@ -419,28 +439,23 @@ def create_inventory_editor():
             new_row = clean_dataframe_types(new_row)
             combined_data = pd.concat([st.session_state.inventory_data, new_row], ignore_index=True)
             st.session_state.inventory_data = clean_dataframe_types(combined_data)
-            st.session_state.data_changed = True
+            trigger_auto_save()
             st.rerun()
     
     with col2:
         if st.button("🗑️ Delete Selected", key=f"delete_{location}"):
-            # Improved delete function using selected_rows
             if grid_response['selected_rows'] is not None and len(grid_response['selected_rows']) > 0:
                 selected_rows_df = pd.DataFrame(grid_response['selected_rows'])
                 
-                # Get current location data
                 current_location_data = st.session_state.inventory_data[
                     st.session_state.inventory_data['Location'] == location
                 ].copy()
                 
-                # Create a list to track which rows to keep
                 rows_to_keep = []
                 
                 for idx, current_row in current_location_data.iterrows():
-                    # Check if this row is in the selected rows
                     is_selected = False
                     for _, selected_row in selected_rows_df.iterrows():
-                        # Compare key fields to identify the row
                         if (str(current_row['Description']) == str(selected_row['Description']) and 
                             str(current_row['Model']) == str(selected_row['Model']) and 
                             str(current_row['SN/Lot']) == str(selected_row['SN/Lot']) and
@@ -451,7 +466,6 @@ def create_inventory_editor():
                     if not is_selected:
                         rows_to_keep.append(current_row)
                 
-                # Update the main dataframe
                 mask = st.session_state.inventory_data['Location'] == location
                 other_data = st.session_state.inventory_data[~mask]
                 
@@ -462,37 +476,15 @@ def create_inventory_editor():
                     st.session_state.inventory_data = other_data
                 
                 st.session_state.inventory_data = clean_dataframe_types(st.session_state.inventory_data)
-                st.session_state.data_changed = True
+                trigger_auto_save()
                 
                 st.success(f"Deleted {len(selected_rows_df)} item(s)")
                 st.rerun()
             else:
                 st.warning("Please select rows to delete by clicking the checkboxes")
-    
-    with col3:
-        if st.button("💾 Save to GitHub", key=f"save_{location}", type="primary"):
-            if GITHUB_TOKEN:
-                with st.spinner("Saving to GitHub..."):
-                    if save_to_github(st.session_state.inventory_data):
-                        st.success("✅ Successfully saved to GitHub!")
-                        st.session_state.data_changed = False
-                        # Clear cache to reload fresh data
-                        st.cache_data.clear()
-                    else:
-                        st.error("❌ Failed to save to GitHub. Please check your configuration.")
-            else:
-                st.error("GitHub token not configured. Please add GITHUB_TOKEN to your Streamlit secrets.")
-    
-    with col4:
-        if st.button("🔄 Refresh", key=f"refresh_{location}"):
-            st.cache_data.clear()
-            st.session_state.inventory_data = load_inventory_data()
-            st.session_state.data_changed = False
-            st.success("Data refreshed!")
-            st.rerun()
 
 def create_image_gallery():
-    """Create simplified image gallery showing only description and units"""
+    """Create image gallery"""
     if len(st.session_state.inventory_data) == 0 or st.session_state.selected_location is None:
         return
     
@@ -509,7 +501,6 @@ def create_image_gallery():
     
     st.markdown(f"## 🖼️ Image Gallery - Location {location} ({layer_position} Layer)")
     
-    # Create image gallery
     cols_per_row = 3
     rows = len(location_data) // cols_per_row + (1 if len(location_data) % cols_per_row > 0 else 0)
     
@@ -522,44 +513,35 @@ def create_image_gallery():
                 with cols[col_idx]:
                     try:
                         if item['Image_URL'] and str(item['Image_URL']).strip() and str(item['Image_URL']) != 'nan':
-                            st.image(
-                                item['Image_URL'],
-                                use_container_width=True
-                            )
+                            st.image(item['Image_URL'], use_container_width=True)
                         else:
-                            st.image(
-                                PLACEHOLDER_IMAGE,
-                                use_container_width=True
-                            )
+                            st.image(PLACEHOLDER_IMAGE, use_container_width=True)
                     except:
-                        st.image(
-                            PLACEHOLDER_IMAGE,
-                            use_container_width=True
-                        )
+                        st.image(PLACEHOLDER_IMAGE, use_container_width=True)
                     
-                    # Show only description and unit count
                     st.markdown(f"**{item['Description']}**")
                     st.markdown(f"Units: {item['Unit']}")
 
 def create_statistics_sidebar():
-    """Create statistics sidebar with layer information"""
+    """Create statistics sidebar"""
     with st.sidebar:
         st.markdown("## 📊 Inventory Statistics")
         
         total_items = len(st.session_state.inventory_data)
         st.metric("Total Items", total_items)
         
-        # Show unsaved changes indicator
-        if st.session_state.data_changed:
-            st.warning("⚠️ Unsaved changes")
+        # Auto-save status
+        if st.session_state.pending_save:
+            st.warning("🟡 Auto-saving...")
+        elif st.session_state.last_save_time:
+            st.success(f"🟢 Last saved: {st.session_state.last_save_time.strftime('%H:%M:%S')}")
         else:
-            st.success("✅ All changes saved")
+            st.info("🔵 Auto-save enabled")
         
         if total_items == 0:
             st.info("No inventory data available")
             return
         
-        # Items by shelf and layer
         st.markdown("### Items by Shelf & Layer")
         for shelf in ['A', 'B', 'C', 'D', 'E']:
             shelf_items = len(st.session_state.inventory_data[
@@ -567,16 +549,15 @@ def create_statistics_sidebar():
             ])
             st.metric(f"Shelf {shelf}", shelf_items)
             
-            # Show layer breakdown
             if shelf in ['A', 'B']:
                 layers = [1, 2, 3]
             elif shelf in ['C', 'D']:
                 layers = [1, 2, 3, 4]
-            else:  # E
+            else:
                 layers = [4]
             
             layer_text = ""
-            for layer in sorted(layers, reverse=True):  # Top to bottom
+            for layer in sorted(layers, reverse=True):
                 layer_count = len(st.session_state.inventory_data[
                     st.session_state.inventory_data['Location'] == f"{shelf}{layer}"
                 ])
@@ -586,7 +567,6 @@ def create_statistics_sidebar():
             if layer_text:
                 st.text(layer_text.strip())
         
-        # Items with images
         items_with_images = len(st.session_state.inventory_data[
             (st.session_state.inventory_data['Image_URL'].notna()) & 
             (st.session_state.inventory_data['Image_URL'] != '') &
@@ -603,6 +583,9 @@ def main():
     create_shelf_visualization()
     create_inventory_editor()
     create_image_gallery()
+    
+    # Check and execute auto-save
+    check_and_execute_auto_save()
 
 if __name__ == "__main__":
     main()
