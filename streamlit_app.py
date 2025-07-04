@@ -9,7 +9,7 @@ import re
 import base64
 import json
 import time
-import threading
+import hashlib
 from datetime import datetime
 
 # Configure page
@@ -30,19 +30,51 @@ GITHUB_REPO = "Montsmed/Sample_Room"
 EXCEL_FILE_PATH = "inventory_data.xlsx"
 
 # Auto-save configuration
-AUTO_SAVE_DELAY = 2  # seconds to wait before auto-saving after last change
-MAX_SAVE_ATTEMPTS = 3  # maximum retry attempts for failed saves
+AUTO_SAVE_DELAY = 2
+MAX_SAVE_ATTEMPTS = 3
 
-# Load data from GitHub Excel file
-@st.cache_data
-def load_inventory_data():
-    """Load inventory data from GitHub Excel file"""
+def get_file_hash(url):
+    """Get hash of remote file to detect changes"""
     try:
-        response = requests.get(EXCEL_FILE_URL)
+        response = requests.get(url)
+        if response.status_code == 200:
+            return hashlib.md5(response.content).hexdigest()
+    except:
+        pass
+    return None
+
+def force_cache_refresh():
+    """Force Streamlit to refresh cached data by clearing all caches"""
+    st.cache_data.clear()
+    if hasattr(st, 'cache_resource'):
+        st.cache_resource.clear()
+
+@st.cache_data(ttl=30)  # Cache for only 30 seconds to detect changes faster
+def load_inventory_data():
+    """Load inventory data from GitHub Excel file with change detection"""
+    try:
+        # Get current file hash
+        current_hash = get_file_hash(EXCEL_FILE_URL)
+        
+        # Store hash in session state for comparison
+        if 'file_hash' not in st.session_state:
+            st.session_state.file_hash = current_hash
+        elif st.session_state.file_hash != current_hash:
+            # File has changed, force refresh
+            st.session_state.file_hash = current_hash
+            force_cache_refresh()
+        
+        # Add timestamp to URL to bypass browser cache
+        timestamped_url = f"{EXCEL_FILE_URL}?t={int(time.time())}"
+        
+        response = requests.get(timestamped_url, headers={'Cache-Control': 'no-cache'})
         response.raise_for_status()
         
         excel_data = BytesIO(response.content)
         df = pd.read_excel(excel_data)
+        
+        # Store load time for display
+        st.session_state.data_load_time = datetime.now()
         
         return clean_dataframe_types(df)
         
@@ -59,7 +91,7 @@ def load_inventory_data():
         })
 
 def clean_dataframe_types(df):
-    """Clean and standardize DataFrame column types for Arrow compatibility"""
+    """Clean and standardize DataFrame column types"""
     df_clean = df.copy()
     
     df_clean['Location'] = df_clean['Location'].astype('string')
@@ -109,7 +141,7 @@ def convert_df_to_excel(df):
     return output.getvalue()
 
 def auto_save_to_github(df, attempt=1):
-    """Auto-save dataframe to GitHub repository with retry logic"""
+    """Auto-save dataframe to GitHub with enhanced refresh mechanism"""
     if not GITHUB_TOKEN:
         return False, "GitHub token not configured"
     
@@ -138,10 +170,19 @@ def auto_save_to_github(df, attempt=1):
         put_response = requests.put(get_url, headers=headers, json=commit_data)
         
         if put_response.status_code in [200, 201]:
+            # After successful save, update file hash and force refresh
+            time.sleep(1)  # Wait for GitHub to process the change
+            new_hash = get_file_hash(EXCEL_FILE_URL)
+            st.session_state.file_hash = new_hash
+            force_cache_refresh()
+            
+            # Create a dummy Python file update to trigger Streamlit refresh
+            update_trigger_file()
+            
             return True, "Successfully auto-saved to GitHub"
         else:
             if attempt < MAX_SAVE_ATTEMPTS:
-                time.sleep(1)  # Wait 1 second before retry
+                time.sleep(1)
                 return auto_save_to_github(df, attempt + 1)
             return False, f"Failed after {MAX_SAVE_ATTEMPTS} attempts: {put_response.status_code}"
             
@@ -151,17 +192,44 @@ def auto_save_to_github(df, attempt=1):
             return auto_save_to_github(df, attempt + 1)
         return False, f"Error after {MAX_SAVE_ATTEMPTS} attempts: {str(e)}"
 
+def update_trigger_file():
+    """Update a Python file to trigger Streamlit app refresh"""
+    try:
+        # Create/update a simple trigger file
+        trigger_content = f"# Last updated: {datetime.now().isoformat()}\nLAST_UPDATE = '{datetime.now().isoformat()}'"
+        trigger_b64 = base64.b64encode(trigger_content.encode()).decode('utf-8')
+        
+        get_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/last_update.py"
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        get_response = requests.get(get_url, headers=headers)
+        
+        commit_data = {
+            'message': f'Update trigger file - {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+            'content': trigger_b64,
+            'branch': 'main'
+        }
+        
+        if get_response.status_code == 200:
+            current_file = get_response.json()
+            commit_data['sha'] = current_file['sha']
+        
+        requests.put(get_url, headers=headers, json=commit_data)
+        
+    except Exception as e:
+        # Silently fail if trigger file update fails
+        pass
+
 def trigger_auto_save():
     """Trigger auto-save after delay"""
-    if 'auto_save_timer' in st.session_state:
-        st.session_state.auto_save_timer = time.time()
-    else:
-        st.session_state.auto_save_timer = time.time()
-    
+    st.session_state.auto_save_timer = time.time()
     st.session_state.pending_save = True
 
 def check_and_execute_auto_save():
-    """Check if auto-save should be executed and do it"""
+    """Check if auto-save should be executed"""
     if (st.session_state.get('pending_save', False) and 
         'auto_save_timer' in st.session_state and 
         time.time() - st.session_state.auto_save_timer >= AUTO_SAVE_DELAY):
@@ -169,21 +237,37 @@ def check_and_execute_auto_save():
         st.session_state.pending_save = False
         
         # Show saving indicator
-        save_placeholder = st.empty()
-        save_placeholder.info("🔄 Auto-saving changes...")
+        with st.spinner("🔄 Auto-saving changes..."):
+            success, message = auto_save_to_github(st.session_state.inventory_data)
+            
+            if success:
+                st.success("✅ Auto-saved successfully! App will refresh shortly.")
+                st.session_state.last_save_time = datetime.now()
+                # Force page refresh after successful save
+                time.sleep(2)
+                st.rerun()
+            else:
+                st.error(f"❌ Auto-save failed: {message}")
+
+def check_for_data_updates():
+    """Periodically check for data updates from GitHub"""
+    if 'last_check_time' not in st.session_state:
+        st.session_state.last_check_time = time.time()
+    
+    # Check every 30 seconds
+    if time.time() - st.session_state.last_check_time > 30:
+        st.session_state.last_check_time = time.time()
+        current_hash = get_file_hash(EXCEL_FILE_URL)
         
-        success, message = auto_save_to_github(st.session_state.inventory_data)
-        
-        if success:
-            save_placeholder.success("✅ Auto-saved successfully!")
-            st.session_state.last_save_time = datetime.now()
-            st.cache_data.clear()  # Clear cache to ensure fresh data on reload
-        else:
-            save_placeholder.error(f"❌ Auto-save failed: {message}")
-        
-        # Clear the message after 3 seconds
-        time.sleep(3)
-        save_placeholder.empty()
+        if (current_hash and 
+            hasattr(st.session_state, 'file_hash') and 
+            st.session_state.file_hash != current_hash):
+            
+            st.session_state.file_hash = current_hash
+            force_cache_refresh()
+            st.session_state.inventory_data = load_inventory_data()
+            st.info("📥 New data detected and loaded from GitHub!")
+            st.rerun()
 
 # Initialize session state
 if 'inventory_data' not in st.session_state:
@@ -195,8 +279,15 @@ if 'pending_save' not in st.session_state:
 if 'last_save_time' not in st.session_state:
     st.session_state.last_save_time = None
 
+# Import the trigger file to help with refresh detection
+try:
+    import last_update
+    st.session_state.trigger_imported = True
+except ImportError:
+    st.session_state.trigger_imported = False
+
 def create_header():
-    """Create header with auto-save status"""
+    """Create header with enhanced status information"""
     col1, col2 = st.columns([3, 1])
     
     with col1:
@@ -209,6 +300,64 @@ def create_header():
             st.markdown(f"🟢 **Last saved:** {st.session_state.last_save_time.strftime('%H:%M:%S')}")
         else:
             st.markdown("🔵 **Auto-save enabled**")
+        
+        # Show data load time
+        if hasattr(st.session_state, 'data_load_time'):
+            st.caption(f"Data loaded: {st.session_state.data_load_time.strftime('%H:%M:%S')}")
+
+def create_file_management():
+    """Enhanced file management with refresh capabilities"""
+    st.markdown("## 📁 File Management")
+    
+    if len(st.session_state.inventory_data) > 0:
+        st.success(f"✅ Inventory data loaded successfully! ({len(st.session_state.inventory_data)} items)")
+    else:
+        st.warning("⚠️ No inventory data available. Please check the GitHub file URL.")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("💾 Force Save Now", help="Manually trigger immediate save to GitHub"):
+            if GITHUB_TOKEN:
+                with st.spinner("Saving to GitHub..."):
+                    success, message = auto_save_to_github(st.session_state.inventory_data)
+                    if success:
+                        st.success("✅ Successfully saved to GitHub!")
+                        st.session_state.last_save_time = datetime.now()
+                        st.session_state.pending_save = False
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to save: {message}")
+            else:
+                st.error("GitHub token not configured.")
+    
+    with col2:
+        if st.button("🔄 Force Refresh", help="Force reload data from GitHub"):
+            force_cache_refresh()
+            st.session_state.inventory_data = load_inventory_data()
+            st.session_state.pending_save = False
+            st.success("Data refreshed successfully!")
+            st.rerun()
+    
+    with col3:
+        if st.button("🔍 Check Updates", help="Check for updates from GitHub"):
+            check_for_data_updates()
+    
+    with col4:
+        if len(st.session_state.inventory_data) > 0:
+            excel_data = convert_df_to_excel(st.session_state.inventory_data)
+            st.download_button(
+                label="📥 Download Excel",
+                data=excel_data,
+                file_name=f"inventory_data_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Download the current inventory data as an Excel file"
+            )
+
+# [Rest of the functions remain the same as in the previous version]
+# create_search_bar(), create_shelf_visualization(), create_inventory_editor(), 
+# create_image_gallery(), create_statistics_sidebar() - all remain unchanged
 
 def create_search_bar():
     """Create search functionality for inventory items"""
@@ -238,51 +387,6 @@ def create_search_bar():
             st.warning(f"No items found matching '{search_query}'")
     else:
         st.info("Type in the search box to find items by description, SN/Lot, or model.")
-
-def create_file_management():
-    """Create download section and manual save option"""
-    st.markdown("## 📁 File Management")
-    
-    if len(st.session_state.inventory_data) > 0:
-        st.success(f"✅ Inventory data loaded successfully! ({len(st.session_state.inventory_data)} items)")
-    else:
-        st.warning("⚠️ No inventory data available. Please check the GitHub file URL.")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("💾 Force Save Now", help="Manually trigger immediate save to GitHub"):
-            if GITHUB_TOKEN:
-                with st.spinner("Saving to GitHub..."):
-                    success, message = auto_save_to_github(st.session_state.inventory_data)
-                    if success:
-                        st.success("✅ Successfully saved to GitHub!")
-                        st.session_state.last_save_time = datetime.now()
-                        st.session_state.pending_save = False
-                        st.cache_data.clear()
-                    else:
-                        st.error(f"❌ Failed to save: {message}")
-            else:
-                st.error("GitHub token not configured.")
-    
-    with col2:
-        if st.button("🔄 Refresh Data", help="Reload data from GitHub repository"):
-            st.cache_data.clear()
-            st.session_state.inventory_data = load_inventory_data()
-            st.session_state.pending_save = False
-            st.success("Data refreshed successfully!")
-            st.rerun()
-    
-    with col3:
-        if len(st.session_state.inventory_data) > 0:
-            excel_data = convert_df_to_excel(st.session_state.inventory_data)
-            st.download_button(
-                label="📥 Download Excel",
-                data=excel_data,
-                file_name=f"inventory_data_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                help="Download the current inventory data as an Excel file"
-            )
 
 def create_shelf_visualization():
     """Create interactive shelf visualization"""
@@ -538,6 +642,10 @@ def create_statistics_sidebar():
         else:
             st.info("🔵 Auto-save enabled")
         
+        # Data freshness indicator
+        if hasattr(st.session_state, 'data_load_time'):
+            st.info(f"📥 Data loaded: {st.session_state.data_load_time.strftime('%H:%M:%S')}")
+        
         if total_items == 0:
             st.info("No inventory data available")
             return
@@ -576,6 +684,9 @@ def create_statistics_sidebar():
 
 # Main app
 def main():
+    # Check for data updates first
+    check_for_data_updates()
+    
     create_header()
     create_statistics_sidebar()
     create_file_management()
