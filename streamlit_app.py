@@ -14,24 +14,39 @@ st.set_page_config(
     layout="wide"
 )
 
-# GitHub image URLs
+# GitHub URLs
 SAMPLE_ROOM_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/Sampleroom.png"
 PLACEHOLDER_IMAGE = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/No_Image.jpg"
+EXCEL_FILE_URL = "https://raw.githubusercontent.com/Montsmed/Sample_Room/main/inventory_data.xlsx"  # Replace with your actual Excel file URL
 
-# Load data from Excel file
+# Load data from GitHub Excel file
 @st.cache_data
 def load_inventory_data():
-    """Load inventory data - starts empty, user must upload Excel file"""
-    # Return empty dataframe with correct column structure and proper data types
-    return pd.DataFrame({
-        'Location': pd.Series([], dtype='string'),
-        'Description': pd.Series([], dtype='string'),
-        'Unit': pd.Series([], dtype='int64'),
-        'Model': pd.Series([], dtype='string'),
-        'SN/Lot': pd.Series([], dtype='string'),
-        'Remark': pd.Series([], dtype='string'),
-        'Image_URL': pd.Series([], dtype='string')
-    })
+    """Load inventory data from GitHub Excel file"""
+    try:
+        # Download Excel file from GitHub
+        response = requests.get(EXCEL_FILE_URL)
+        response.raise_for_status()
+        
+        # Read Excel file from bytes
+        excel_data = BytesIO(response.content)
+        df = pd.read_excel(excel_data)
+        
+        # Clean and standardize data types
+        return clean_dataframe_types(df)
+        
+    except Exception as e:
+        st.error(f"Error loading data from GitHub: {e}")
+        # Return empty dataframe with correct structure if loading fails
+        return pd.DataFrame({
+            'Location': pd.Series([], dtype='string'),
+            'Description': pd.Series([], dtype='string'),
+            'Unit': pd.Series([], dtype='int64'),
+            'Model': pd.Series([], dtype='string'),
+            'SN/Lot': pd.Series([], dtype='string'),
+            'Remark': pd.Series([], dtype='string'),
+            'Image_URL': pd.Series([], dtype='string')
+        })
 
 def clean_dataframe_types(df):
     """Clean and standardize DataFrame column types for Arrow compatibility"""
@@ -105,7 +120,7 @@ def create_search_bar():
     st.markdown("## 🔍 Search Inventory Items")
     
     if len(st.session_state.inventory_data) == 0:
-        st.info("Upload an Excel file first to enable search functionality.")
+        st.info("No inventory data available. Please check the GitHub file URL.")
         return
     
     search_query = st.text_input(
@@ -131,65 +146,22 @@ def create_search_bar():
         st.info("Type in the search box to find items by description, SN/Lot, or model.")
 
 def create_file_management():
-    """Create file upload and download section - removed previews"""
+    """Create download section only"""
     st.markdown("## 📁 File Management")
     
-    # Show initial message if no data
-    if len(st.session_state.inventory_data) == 0:
-        st.info("🚀 Welcome! Please upload an Excel file to get started with your inventory management.")
+    # Show data status
+    if len(st.session_state.inventory_data) > 0:
+        st.success(f"✅ Inventory data loaded successfully! ({len(st.session_state.inventory_data)} items)")
+    else:
+        st.warning("⚠️ No inventory data available. Please check the GitHub file URL.")
     
-    col1, col2 = st.columns(2)
+    # Download section
+    st.markdown("### 📥 Download Excel File")
     
-    with col1:
-        st.markdown("### 📤 Upload Excel File")
-        uploaded_file = st.file_uploader(
-            "Choose an Excel file to load inventory data",
-            type=['xlsx', 'xls'],
-            help="Upload an Excel file with columns: Location, Description, Unit, Model, SN/Lot, Remark, Image_URL"
-        )
+    if len(st.session_state.inventory_data) > 0:
+        col1, col2 = st.columns(2)
         
-        if uploaded_file is not None:
-            try:
-                # Read the uploaded Excel file
-                new_data = pd.read_excel(uploaded_file)
-                
-                # Clean the data types
-                new_data = clean_dataframe_types(new_data)
-                
-                # Validate required columns
-                required_columns = ['Location', 'Description', 'Unit', 'Model', 'SN/Lot', 'Remark', 'Image_URL']
-                missing_columns = [col for col in required_columns if col not in new_data.columns]
-                
-                if missing_columns:
-                    st.error(f"Missing required columns: {', '.join(missing_columns)}")
-                    st.info("Please ensure your Excel file has these columns: Location, Description, Unit, Model, SN/Lot, Remark, Image_URL")
-                else:
-                    st.success("✅ File uploaded successfully!")
-                    
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        if st.button("🔄 Replace Current Data", key="replace_data"):
-                            st.session_state.inventory_data = new_data
-                            st.success("Inventory data has been updated!")
-                            st.rerun()
-                    
-                    with col_b:
-                        if st.button("➕ Add to Current Data", key="add_data"):
-                            combined_data = pd.concat([
-                                st.session_state.inventory_data, new_data
-                            ], ignore_index=True)
-                            st.session_state.inventory_data = clean_dataframe_types(combined_data)
-                            st.success("Data has been added to current inventory!")
-                            st.rerun()
-                        
-            except Exception as e:
-                st.error(f"Error reading Excel file: {e}")
-                st.info("Please make sure the file is a valid Excel file (.xlsx or .xls)")
-    
-    with col2:
-        st.markdown("### 📥 Download Excel File")
-        
-        if len(st.session_state.inventory_data) > 0:
+        with col1:
             st.write("Download the current inventory data as an Excel file")
             
             # Convert dataframe to Excel
@@ -203,20 +175,35 @@ def create_file_management():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 help="Download the current inventory data as an Excel file"
             )
-        else:
-            st.info("No data available to download. Please upload an Excel file first.")
-            
-            # Provide template download
-            template_data = load_inventory_data()
-            template_excel = convert_df_to_excel(template_data)
-            
-            st.download_button(
-                label="📋 Download Template",
-                data=template_excel,
-                file_name="inventory_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                help="Download an empty template to fill with your inventory data"
-            )
+        
+        with col2:
+            # Refresh data button
+            if st.button("🔄 Refresh Data from GitHub", help="Reload data from the GitHub repository"):
+                st.session_state.inventory_data = load_inventory_data()
+                st.success("Data refreshed successfully!")
+                st.rerun()
+    else:
+        st.info("No data available to download.")
+        
+        # Provide template download
+        template_data = pd.DataFrame({
+            'Location': pd.Series([], dtype='string'),
+            'Description': pd.Series([], dtype='string'),
+            'Unit': pd.Series([], dtype='int64'),
+            'Model': pd.Series([], dtype='string'),
+            'SN/Lot': pd.Series([], dtype='string'),
+            'Remark': pd.Series([], dtype='string'),
+            'Image_URL': pd.Series([], dtype='string')
+        })
+        template_excel = convert_df_to_excel(template_data)
+        
+        st.download_button(
+            label="📋 Download Template",
+            data=template_excel,
+            file_name="inventory_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Download an empty template to fill with your inventory data"
+        )
 
 def create_shelf_visualization():
     """Create interactive shelf visualization with resized sample room layout image"""
@@ -231,7 +218,7 @@ def create_shelf_visualization():
     st.markdown("**Layer arrangement: 4 (Top) → 3 → 2 → 1 (Bottom)**")
     
     if len(st.session_state.inventory_data) == 0:
-        st.info("📤 Upload an Excel file to see inventory items in the shelf locations.")
+        st.info("📊 No inventory data available. Please check the GitHub file URL.")
         return
     
     st.markdown("Click on any shelf location to view and edit inventory items:")
@@ -275,7 +262,7 @@ def create_shelf_visualization():
 def create_inventory_editor():
     """Create inventory editor for selected location with improved delete functionality"""
     if len(st.session_state.inventory_data) == 0:
-        st.info("📤 Please upload an Excel file first to start managing your inventory.")
+        st.info("📊 No inventory data available. Please check the GitHub file URL.")
         return
         
     if st.session_state.selected_location is None:
@@ -431,7 +418,6 @@ def create_inventory_editor():
         if st.button("💾 Save Changes", key=f"save_{location}"):
             st.success("Changes saved successfully!")
 
-
 def create_image_gallery():
     """Create simplified image gallery showing only description and units"""
     if len(st.session_state.inventory_data) == 0 or st.session_state.selected_location is None:
@@ -491,7 +477,7 @@ def create_statistics_sidebar():
         st.metric("Total Items", total_items)
         
         if total_items == 0:
-            st.info("Upload an Excel file to see statistics")
+            st.info("No inventory data available")
             return
         
         # Items by shelf and layer
@@ -528,7 +514,6 @@ def create_statistics_sidebar():
             (st.session_state.inventory_data['Image_URL'] != 'nan')
         ])
         st.metric("Items with Images", items_with_images)
-
 
 # Main app
 def main():
